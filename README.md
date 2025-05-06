@@ -4,10 +4,4 @@ Lexi is a project to power AI-assisted Telegram bots. It acts as the glue code b
 
 The primary goal is to create versatile AI assistants that can participate in both direct messages and group chats on Telegram.
 
-## Features
-
-- [ ] Responding to @ mentions
-- [ ] Function calling
-- [ ] Learning from users
-- [ ] Responding when mentioned by name in a group
-- [ ] Responding without being mentioned when having something to say
+See issues for the current roadmap.
