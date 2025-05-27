@@ -33,4 +33,8 @@ sqlx = { version = "0.8.5", features = [
 ] }
 tokio = { version = "1.45", features = ["full"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
