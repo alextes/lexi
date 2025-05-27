@@ -24,13 +24,13 @@ struct HandlerContext<'a> {
     http_client: &'a ReqwestClient,
     api_base_url: &'a str,
     bot_token: &'a str,
-    bot_db_id: i64,
+    bot_db_id: i32,
 }
 
 async fn process_message_content(
     ctx: &HandlerContext<'_>,
     incoming_message: &TelegramMessage,
-    local_chat_id_for_conversation: i64,
+    local_chat_id_for_conversation: i32,
 ) -> Result<()> {
     let should_trigger_ai_reply = incoming_message.chat.chat_type == "private"
         || mentions_bot(&incoming_message.text, &incoming_message.entities);
@@ -112,7 +112,7 @@ pub async fn process_update(
     http_client: &ReqwestClient,
     api_base_url: &str,
     bot_token: &str,
-    bot_db_id: i64,
+    bot_db_id: i32,
 ) -> Result<()> {
     debug!(?update, "processing update in handler");
 
@@ -222,7 +222,7 @@ async fn generate_and_send_ai_reply(
     ctx: &HandlerContext<'_>,
     incoming_message: &TelegramMessage,
     prompt_text: &str,
-    local_chat_id_for_conversation: i64,
+    local_chat_id_for_conversation: i32,
 ) -> Result<()> {
     info!(
         chat_id = incoming_message.chat.id,

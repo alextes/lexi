@@ -21,11 +21,11 @@ pub async fn run_bot_loop(
     pool: PgPool,
     bot_token: String,
     http_client: ReqwestClient,
-    openai_client: OpenAIClient<OpenAIConfig>, // Specify generic
-    bot_db_id: i32,                            // Changed from i64 to i32
+    openai_client: OpenAIClient<OpenAIConfig>,
+    bot_db_id: i32,
 ) -> Result<()> {
     let mut last_update_id = 0;
-    info!(bot_db_id, "bot loop started. listening for updates..."); // Log bot_db_id
+    info!(bot_db_id, "bot loop started. listening for updates...");
 
     loop {
         let get_updates_url = format!(
@@ -66,7 +66,6 @@ pub async fn run_bot_loop(
                         last_update_id = update.update_id;
                         debug!(raw_update_object = ?update, "main loop: received update object from api");
 
-                        // Pass http_client, TELEGRAM_API_URL, and bot_token to handler
                         handler::process_update(
                             &pool,
                             &update,
