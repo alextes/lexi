@@ -1,8 +1,10 @@
+pub mod types;
+
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde::Serialize;
 
-use crate::types::{ApiResponse, Message as TelegramMessage, User as TelegramUser};
+use types::{ApiResponse, Message as TelegramMessage, User as TelegramUser};
 
 // Keep TELEGRAM_API_URL in main.rs as it's used there for getUpdates too,
 // or move to a shared consts.rs if more URLs are added.

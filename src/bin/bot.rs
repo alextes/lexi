@@ -1,20 +1,14 @@
-use anyhow::{Context, Result}; // Use anyhow::Result
-use async_openai::{
-    config::OpenAIConfig, // Import OpenAIConfig
-    Client as OpenAIClient,
-};
+use anyhow::{Context, Result};
+use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use reqwest::Client as ReqwestClient;
-use sqlx::SqlitePool; // Keep for type annotation if needed, though pool comes from db module
 use std::env;
 use std::time::Duration;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-// Assuming lexi is the name of your crate, and it's correctly configured in Cargo.toml
 use lexi::db;
 use lexi::run_bot_loop;
-use lexi::telegram_client;
-use lexi::types;
+use lexi::telegram;
 use lexi::TELEGRAM_API_URL;
 
 #[tokio::main]
@@ -46,7 +40,7 @@ async fn main() -> Result<()> {
 
     // Get bot's own details and store it
     info!("fetching bot's own user details...");
-    let bot_user_from_api = telegram_client::get_me(&reqwest_client, TELEGRAM_API_URL, &bot_token)
+    let bot_user_from_api = telegram::get_me(&reqwest_client, TELEGRAM_API_URL, &bot_token)
         .await
         .context("failed to get bot's own user details via getMe API")?;
     info!(?bot_user_from_api, "successfully fetched bot details");
