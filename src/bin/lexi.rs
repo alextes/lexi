@@ -6,10 +6,9 @@ use std::time::Duration;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use lexi::bot_loop::{run_bot_loop, TELEGRAM_API_URL};
 use lexi::db;
-use lexi::run_bot_loop;
 use lexi::telegram;
-use lexi::TELEGRAM_API_URL;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -112,7 +112,7 @@ pub async fn process_instruction_with_sql_tool(
     info!(instruction = %instruction, model = %model, "(sql select tool) processing instruction");
 
     let system_prompt = format!(
-        "you are a helpful assistant. you have one tool available: '{}'. \
+        "you are a helpful assistant. the user may refer to you as lexi. you have one tool available: '{}'. \
         use it when appropriate to answer user questions. \
         only issue select queries starting with 'select'. \
         the available tables are: \
