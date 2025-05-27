@@ -1,4 +1,3 @@
-use eyre::{eyre, Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
@@ -9,6 +8,7 @@ use async_openai::{
     },
     Client as OpenAIClient,
 };
+use eyre::{eyre, Context, Result};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::{Column, PgPool, Row, ValueRef};
 use tracing::{debug, error, info, warn};
@@ -111,7 +111,21 @@ pub async fn process_instruction_with_sql_tool(
 ) -> Result<String> {
     info!(instruction = %instruction, model = %model, "(sql select tool) processing instruction");
 
-    let system_prompt = format!("you are a helpful assistant. you have one tool available: '{}'. use it when appropriate to answer user questions. only issue select queries starting with 'select' to query the 'users' table or other relevant tables. if you use the tool, summarize the results for the user upon receiving them.", SQL_TOOL_NAME);
+    let system_prompt = format!(
+        "you are a helpful assistant. you have one tool available: '{}'. \
+        use it when appropriate to answer user questions. \
+        only issue select queries starting with 'select'. \
+        the available tables are: \
+        1. 'users' (stores telegram user information): \
+           columns: id (serial primary key), telegram_id (bigint unique not null), username (text), first_name (text not null), last_name (text), is_bot (boolean not null default false), created_at (timestamptz not null default now()), updated_at (timestamptz not null default now()). \
+        2. 'chats' (stores chat information): \
+           columns: id (serial primary key), telegram_id (bigint unique not null), type (text not null - e.g., 'private', 'group'), title (text), username (text), created_at (timestamptz not null default now()), updated_at (timestamptz not null default now()). \
+        3. 'messages' (stores messages from chats): \
+           columns: id (serial primary key), telegram_message_id (bigint not null), chat_id (integer not null, references chats.id), sender_id (integer not null, references users.id), text (text), sent_at (timestamptz not null), raw_message (text), created_at (timestamptz not null default now()). \
+        ensure your queries target these tables and their specified columns. \
+        if you use the tool, summarize the results for the user upon receiving them.",
+        SQL_TOOL_NAME
+    );
     let system_message = ChatCompletionRequestSystemMessageArgs::default()
         .content(system_prompt)
         .build()?;
