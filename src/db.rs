@@ -149,3 +149,46 @@ pub async fn insert_message(
         Ok(existing_row.id)
     }
 }
+
+// struct to represent a message from history for openai
+#[derive(Debug)]
+pub struct MessageFromHistory {
+    pub sender_id: i32,
+    pub text: Option<String>,
+    // pub sent_at: DateTime<Utc>, // not directly needed for openai message construction yet
+    // pub username: Option<String>, // potentially useful for the 'name' field in openai message
+}
+
+// fetches the last N messages from a given chat for building conversation history.
+// orders by sent_at ascending (oldest of the N to newest).
+pub async fn get_message_history(
+    pool: &PgPool,
+    local_chat_id: i32,
+    limit: i64,
+) -> Result<Vec<MessageFromHistory>> {
+    let messages = sqlx::query_as!(
+        MessageFromHistory,
+        r#"
+        SELECT sender_id, text --, sent_at, u.username -- include username if joining with users table
+        FROM messages m
+        -- Optional: JOIN users u ON m.sender_id = u.id 
+        WHERE m.chat_id = $1
+        ORDER BY m.sent_at DESC -- get the latest N first
+        LIMIT $2;
+        "#,
+        local_chat_id,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .wrap_err_with(|| {
+        format!(
+            "failed to fetch message history for chat_id {} with limit {}",
+            local_chat_id,
+            limit
+        )
+    })?;
+
+    // The query gets latest N, but openai expects history oldest to newest.
+    Ok(messages.into_iter().rev().collect())
+}

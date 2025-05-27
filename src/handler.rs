@@ -3,6 +3,7 @@ use crate::{db, telegram};
 use async_openai::{
     config::OpenAIConfig,
     types::{
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
         CreateChatCompletionRequestArgs,
     },
@@ -228,7 +229,7 @@ async fn generate_and_send_ai_reply(
         chat_id = incoming_message.chat.id,
         message_id = incoming_message.message_id,
         prompt = prompt_text,
-        "Generating AI reply for {}",
+        "generating ai reply for {}",
         if incoming_message.chat.chat_type == "private" {
             "direct message"
         } else {
@@ -236,6 +237,52 @@ async fn generate_and_send_ai_reply(
         }
     );
 
+    let mut messages: Vec<ChatCompletionRequestMessage> = Vec::new();
+
+    // system message first
+    let system_chat_message = ChatCompletionRequestSystemMessageArgs::default()
+        .content("you are a helpful ai assistant named lexi.") // updated to match the one in sql_select
+        .build()
+        .wrap_err_with(|| "failed to build system message for openai")?
+        .into();
+    messages.push(system_chat_message);
+
+    // fetch and add history
+    match db::get_message_history(ctx.pool, local_chat_id_for_conversation, 20).await {
+        Ok(history) => {
+            for historical_msg in history {
+                if let Some(text) = historical_msg.text {
+                    if historical_msg.sender_id == ctx.bot_db_id {
+                        messages.push(
+                            ChatCompletionRequestAssistantMessageArgs::default()
+                                .content(text)
+                                .build()?
+                                .into(),
+                        );
+                    } else {
+                        // todo: consider adding user's name here if available and desired
+                        messages.push(
+                            ChatCompletionRequestUserMessageArgs::default()
+                                .content(text)
+                                .build()?
+                                .into(),
+                        );
+                    }
+                }
+            }
+            info!(
+                chat_id = incoming_message.chat.id,
+                history_len = messages.len() - 1,
+                "added message history to openai request"
+            );
+        }
+        Err(e) => {
+            warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch message history, proceeding without it.");
+            // not returning an error, just proceeding without history
+        }
+    }
+
+    // current user message
     let mut user_message_builder = ChatCompletionRequestUserMessageArgs::default();
     user_message_builder.content(prompt_text);
     if let Some(name_str) = incoming_message
@@ -247,20 +294,15 @@ async fn generate_and_send_ai_reply(
     }
     let user_chat_message = user_message_builder
         .build()
-        .wrap_err_with(|| "Failed to build user message for OpenAI")?
+        .wrap_err_with(|| "failed to build user message for openai")?
         .into();
-
-    let system_chat_message = ChatCompletionRequestSystemMessageArgs::default()
-        .content("You are a helpful AI assistant named Lexi.")
-        .build()
-        .wrap_err_with(|| "Failed to build system message for OpenAI")?
-        .into();
+    messages.push(user_chat_message);
 
     let request = CreateChatCompletionRequestArgs::default()
         .model(DEFAULT_OPENAI_MODEL)
-        .messages(vec![system_chat_message, user_chat_message])
+        .messages(messages) // use the full list of messages
         .build()
-        .wrap_err_with(|| "Failed to build OpenAI chat completion request")?;
+        .wrap_err_with(|| "failed to build openai chat completion request")?;
 
     match ctx.openai_client.chat().create(request).await {
         Ok(completion_response) => {
