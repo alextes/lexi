@@ -5,11 +5,11 @@ pub mod log;
 pub mod telegram;
 pub mod tools;
 
-use anyhow::{Context, Result}; // Use anyhow::Result
 use async_openai::{
     config::OpenAIConfig, // Import OpenAIConfig
     Client as OpenAIClient,
 };
+use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use sqlx::PgPool;
 use std::time::Duration;
@@ -41,7 +41,7 @@ pub async fn run_bot_loop(
             .get(&get_updates_url)
             .send()
             .await
-            .with_context(|| {
+            .wrap_err_with(|| {
                 format!(
                     "failed to send getUpdates request to URL: {}",
                     get_updates_url
@@ -53,7 +53,7 @@ pub async fn run_bot_loop(
             let api_response = response
                 .json::<telegram::types::ApiResponse<Vec<telegram::types::Update>>>()
                 .await
-                .with_context(|| "failed to parse json response from getUpdates")?;
+                .wrap_err_with(|| "failed to parse json response from getUpdates")?;
 
             if api_response.ok {
                 if let Some(updates) = api_response.result {
@@ -76,7 +76,7 @@ pub async fn run_bot_loop(
                             bot_db_id, // Pass bot_db_id
                         )
                         .await
-                        .with_context(|| {
+                        .wrap_err_with(|| {
                             format!("error processing update_id: {}", update.update_id)
                         })?;
                     }
@@ -96,7 +96,7 @@ pub async fn run_bot_loop(
                     if code == 401 || code == 404 {
                         error!("critical telegram api error ({}). please check your token. exiting loop.", code);
                         // This is a critical error, so we return an error to stop the bot loop.
-                        return Err(anyhow::anyhow!(
+                        return Err(eyre::eyre!(
                             "telegram API error {}: {}",
                             code,
                             api_response.description.unwrap_or_default()

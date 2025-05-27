@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use eyre::{eyre, Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
@@ -230,13 +230,13 @@ pub async fn process_instruction_with_sql_tool(
                     return Ok(final_content.clone());
                 } else {
                     warn!("(sql select tool) second ai response had no content.");
-                    return Err(anyhow!(
+                    return Err(eyre!(
                         "(sql select tool) second ai response had no content."
                     ));
                 }
             } else {
                 error!("(sql select tool) no choices in second openai response.");
-                return Err(anyhow!(
+                return Err(eyre!(
                     "(sql select tool) no choices in second openai response."
                 ));
             }
@@ -245,13 +245,13 @@ pub async fn process_instruction_with_sql_tool(
             return Ok(content.clone());
         } else {
             warn!("(sql select tool) first ai response had no content or tool calls.");
-            return Err(anyhow!(
+            return Err(eyre!(
                 "(sql select tool) first ai response had no content or tool calls."
             ));
         }
     } else {
         error!("(sql select tool) no choices in first openai response.");
-        Err(anyhow!(
+        Err(eyre!(
             "(sql select tool) no choices in first openai response."
         ))
     }

@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use eyre::{Context, ContextCompat, Result};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use std::str::FromStr;
 
@@ -10,13 +10,13 @@ use crate::telegram::types::{
 // Initialize database connection and run migrations
 pub async fn initialize_database(database_url: &str) -> Result<PgPool> {
     let options = PgConnectOptions::from_str(database_url)
-        .with_context(|| format!("failed to parse database_url: '{}'", database_url))?;
+        .wrap_err_with(|| format!("failed to parse database_url: '{}'", database_url))?;
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .connect_with(options)
         .await
-        .with_context(|| {
+        .wrap_err_with(|| {
             format!(
                 "failed to connect to postgresql database at {}",
                 database_url
@@ -27,7 +27,7 @@ pub async fn initialize_database(database_url: &str) -> Result<PgPool> {
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
-        .with_context(|| "failed to run database migrations")?;
+        .wrap_err_with(|| "failed to run database migrations")?;
     tracing::info!("database migrations complete (postgresql).");
 
     Ok(pool)
@@ -56,7 +56,7 @@ pub async fn upsert_user(pool: &PgPool, user_data: &TelegramUser) -> Result<i32>
     )
     .fetch_one(pool)
     .await
-    .with_context(|| format!("failed to upsert user with telegram_id {}", user_data.id))?;
+    .wrap_err_with(|| format!("failed to upsert user with telegram_id {}", user_data.id))?;
 
     Ok(query_result.id)
 }
@@ -82,7 +82,7 @@ pub async fn upsert_chat(pool: &PgPool, chat_data: &TelegramChat) -> Result<i32>
     )
     .fetch_one(pool)
     .await
-    .with_context(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
+    .wrap_err_with(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
 
     Ok(query_result.id)
 }
@@ -99,7 +99,7 @@ pub async fn insert_message(
     raw_message_json: &str,
 ) -> Result<i32> {
     let sent_at_datetime =
-        DateTime::<Utc>::from_timestamp(message_data.date, 0).with_context(|| {
+        DateTime::<Utc>::from_timestamp(message_data.date, 0).wrap_err_with(|| {
             format!(
                 "failed to convert telegram message date {} to naivedatetime",
                 message_data.date
@@ -122,7 +122,7 @@ pub async fn insert_message(
     )
     .fetch_optional(pool)
     .await
-    .with_context(|| format!("failed to execute insert_or_do_nothing for message with telegram_message_id {}", message_data.message_id))?;
+    .wrap_err_with(|| format!("failed to execute insert_or_do_nothing for message with telegram_message_id {}", message_data.message_id))?;
 
     if let Some(row) = insert_result {
         tracing::debug!(
@@ -145,7 +145,7 @@ pub async fn insert_message(
         )
         .fetch_one(pool)
         .await
-        .with_context(|| format!("failed to fetch id for existing message (tg_id: {}, chat_id: {}) after insert_or_do_nothing", message_data.message_id, local_chat_id))?;
+        .wrap_err_with(|| format!("failed to fetch id for existing message (tg_id: {}, chat_id: {}) after insert_or_do_nothing", message_data.message_id, local_chat_id))?;
         Ok(existing_row.id)
     }
 }

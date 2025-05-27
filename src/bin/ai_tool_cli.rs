@@ -2,7 +2,7 @@
 // The existing content will be preserved during the rename operation,
 // and then modified in the subsequent step.
 
-use anyhow::{Context, Result};
+use eyre::{Context, Result};
 use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use clap::Parser;
 use dotenv::dotenv;
@@ -28,6 +28,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    color_eyre::install()?;
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

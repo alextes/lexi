@@ -1,6 +1,5 @@
 use crate::telegram::types::{Message as TelegramMessage, Update as TelegramUpdate};
 use crate::{db, telegram};
-use anyhow::{anyhow, Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
@@ -9,6 +8,7 @@ use async_openai::{
     },
     Client as OpenAIClient,
 };
+use eyre::{eyre, Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use sqlx::PgPool;
@@ -62,7 +62,7 @@ async fn process_message_content(
                 &acknowledgement,
             )
             .await
-            .with_context(|| "failed to send acknowledgement for empty prompt")?;
+            .wrap_err_with(|| "failed to send acknowledgement for empty prompt")?;
 
             let ack_raw_json = serde_json_to_string(&sent_ack_message)
                 .context("failed to serialize bot acknowledgement message to JSON")?;
@@ -74,7 +74,7 @@ async fn process_message_content(
                 &ack_raw_json,
             )
             .await
-            .with_context(|| {
+            .wrap_err_with(|| {
                 format!(
                     "failed to insert bot acknowledgement (id: {}) into database",
                     sent_ack_message.message_id
@@ -132,14 +132,14 @@ pub async fn process_update(
 
         let local_user_id = db::upsert_user(pool, sender_data)
             .await
-            .with_context(|| format!("upserting user (telegram_id: {}) failed", sender_data.id))?;
+            .wrap_err_with(|| format!("upserting user (telegram_id: {}) failed", sender_data.id))?;
 
         let chat_data = &incoming_message.chat;
         let local_chat_id_for_conversation = db::upsert_chat(pool, chat_data)
             .await
-            .with_context(|| format!("upserting chat (telegram_id: {}) failed", chat_data.id))?;
+            .wrap_err_with(|| format!("upserting chat (telegram_id: {}) failed", chat_data.id))?;
 
-        let raw_message_json = serde_json_to_string(incoming_message).with_context(|| {
+        let raw_message_json = serde_json_to_string(incoming_message).wrap_err_with(|| {
             format!(
                 "serializing message (id: {}) to json failed",
                 incoming_message.message_id
@@ -154,7 +154,7 @@ pub async fn process_update(
             &raw_message_json,
         )
         .await
-        .with_context(|| {
+        .wrap_err_with(|| {
             format!(
                 "inserting incoming message (id: {}) failed",
                 incoming_message.message_id
@@ -247,20 +247,20 @@ async fn generate_and_send_ai_reply(
     }
     let user_chat_message = user_message_builder
         .build()
-        .with_context(|| "Failed to build user message for OpenAI")?
+        .wrap_err_with(|| "Failed to build user message for OpenAI")?
         .into();
 
     let system_chat_message = ChatCompletionRequestSystemMessageArgs::default()
         .content("You are a helpful AI assistant named Lexi.")
         .build()
-        .with_context(|| "Failed to build system message for OpenAI")?
+        .wrap_err_with(|| "Failed to build system message for OpenAI")?
         .into();
 
     let request = CreateChatCompletionRequestArgs::default()
         .model(DEFAULT_OPENAI_MODEL)
         .messages(vec![system_chat_message, user_chat_message])
         .build()
-        .with_context(|| "Failed to build OpenAI chat completion request")?;
+        .wrap_err_with(|| "Failed to build OpenAI chat completion request")?;
 
     match ctx.openai_client.chat().create(request).await {
         Ok(completion_response) => {
@@ -278,7 +278,7 @@ async fn generate_and_send_ai_reply(
                         ai_reply_content,
                     )
                     .await
-                    .with_context(|| {
+                    .wrap_err_with(|| {
                         format!(
                             "Failed to send OpenAI reply to chat_id {}",
                             incoming_message.chat.id
@@ -295,7 +295,7 @@ async fn generate_and_send_ai_reply(
                         &bot_reply_raw_json,
                     )
                     .await
-                    .with_context(|| {
+                    .wrap_err_with(|| {
                         format!(
                             "failed to insert bot reply (id: {}) into database",
                             sent_bot_message.message_id
@@ -311,14 +311,14 @@ async fn generate_and_send_ai_reply(
                         chat_id = incoming_message.chat.id,
                         "OpenAI response choice did not contain content."
                     );
-                    return Err(anyhow!("OpenAI response choice missing content"));
+                    return Err(eyre!("OpenAI response choice missing content"));
                 }
             } else {
                 warn!(
                     chat_id = incoming_message.chat.id,
                     "OpenAI response did not contain any choices."
                 );
-                return Err(anyhow!("OpenAI response missing choices"));
+                return Err(eyre!("OpenAI response missing choices"));
             }
         }
         Err(e) => {

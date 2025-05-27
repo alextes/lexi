@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
+use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::time::Duration;
@@ -13,7 +13,8 @@ use lexi::TELEGRAM_API_URL;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Changed to anyhow::Result
+    color_eyre::install()?;
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
@@ -36,7 +37,7 @@ async fn main() -> Result<()> {
 
     // Check for OPENAI_API_KEY before creating client
     env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set in environment variables")?;
-    let openai_client = OpenAIClient::<OpenAIConfig>::new(); // Specify generic, no with_context here
+    let openai_client = OpenAIClient::<OpenAIConfig>::new(); // Specify generic, no wrap_err_with here
 
     // Get bot's own details and store it
     info!("fetching bot's own user details...");
@@ -47,7 +48,7 @@ async fn main() -> Result<()> {
 
     let bot_db_id = db::upsert_user(&pool, &bot_user_from_api)
         .await
-        .with_context(|| {
+        .wrap_err_with(|| {
             format!(
                 "failed to upsert bot's own user data (telegram_id: {}) into database",
                 bot_user_from_api.id
