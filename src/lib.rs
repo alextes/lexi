@@ -1,6 +1,7 @@
 pub mod db;
 pub mod handler;
 pub mod telegram_client;
+pub mod tools;
 pub mod types;
 
 use anyhow::{Context, Result}; // Use anyhow::Result
