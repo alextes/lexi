@@ -11,8 +11,8 @@ name = "lexi"
 path = "src/bin/bot.rs"
 
 [[bin]]
-name = "test_tool"
-path = "src/bin/test_tool.rs"
+name = "ai_tool_cli"
+path = "src/bin/ai_tool_cli.rs"
 
 [dependencies]
 anyhow = "1.0"
