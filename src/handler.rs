@@ -1,6 +1,5 @@
-use crate::db;
-use crate::telegram_client;
-use crate::types::{Message as TelegramMessage, Update as TelegramUpdate};
+use crate::telegram::types::{Message as TelegramMessage, Update as TelegramUpdate};
+use crate::{db, telegram};
 use anyhow::{anyhow, Context, Result};
 use async_openai::{
     config::OpenAIConfig,
@@ -12,7 +11,7 @@ use async_openai::{
 };
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tracing::{debug, error, info, warn};
 
 const BOT_USERNAME: &str = "@lexi_alex_bot";
@@ -20,7 +19,7 @@ const DEFAULT_OPENAI_MODEL: &str = "gpt-4.1";
 
 // Context struct to hold shared resources and configuration
 struct HandlerContext<'a> {
-    pool: &'a SqlitePool,
+    pool: &'a PgPool,
     openai_client: &'a OpenAIClient<OpenAIConfig>,
     http_client: &'a ReqwestClient,
     api_base_url: &'a str,
@@ -55,7 +54,7 @@ async fn process_message_content(
                 incoming_message.from.as_ref().map_or("there", |u| &u.first_name),
                 if incoming_message.chat.chat_type == "private" { "messaged" } else { "mentioned" }
             );
-            let sent_ack_message = telegram_client::send_message(
+            let sent_ack_message = telegram::send_message(
                 ctx.http_client,
                 ctx.api_base_url,
                 ctx.bot_token,
@@ -107,7 +106,7 @@ async fn process_message_content(
 }
 
 pub async fn process_update(
-    pool: &SqlitePool,
+    pool: &PgPool,
     update: &TelegramUpdate,
     openai_client: &OpenAIClient<OpenAIConfig>,
     http_client: &ReqwestClient,
@@ -186,7 +185,7 @@ pub async fn process_update(
 
 fn mentions_bot(
     text_option: &Option<String>,
-    entities_option: &Option<Vec<crate::types::MessageEntity>>,
+    entities_option: &Option<Vec<crate::telegram::types::MessageEntity>>,
 ) -> bool {
     if let (Some(text), Some(entities)) = (text_option, entities_option) {
         entities.iter().any(|entity| {
@@ -204,7 +203,7 @@ fn mentions_bot(
 
 fn extract_prompt_from_mention(
     text: &str,
-    entities_option: &Option<Vec<crate::types::MessageEntity>>,
+    entities_option: &Option<Vec<crate::telegram::types::MessageEntity>>,
 ) -> String {
     if let Some(entities) = entities_option {
         for entity in entities {
@@ -271,7 +270,7 @@ async fn generate_and_send_ai_reply(
                         chat_id = incoming_message.chat.id,
                         "Received reply from OpenAI: '{}'", ai_reply_content
                     );
-                    let sent_bot_message = telegram_client::send_message(
+                    let sent_bot_message = telegram::send_message(
                         ctx.http_client,
                         ctx.api_base_url,
                         ctx.bot_token,
@@ -326,7 +325,7 @@ async fn generate_and_send_ai_reply(
             error!(chat_id = incoming_message.chat.id, error = %e, "OpenAI API call failed");
             let fallback_message_text =
                 "Sorry, I encountered an issue trying to process your request with the AI.";
-            match telegram_client::send_message(
+            match telegram::send_message(
                 ctx.http_client,
                 ctx.api_base_url,
                 ctx.bot_token,

@@ -1,161 +1,151 @@
-use sqlx::sqlite::{SqlitePool, SqliteConnectOptions};
-use sqlx::Row;
-use std::str::FromStr;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use anyhow::{Context, Result}; // Added anyhow
+use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use std::str::FromStr;
 
-use crate::types::{User as TelegramUser, Chat as TelegramChat, Message as TelegramMessage};
+use crate::telegram::types::{
+    Chat as TelegramChat, Message as TelegramMessage, User as TelegramUser,
+};
 
 // Initialize database connection and run migrations
-pub async fn initialize_database(database_url: &str) -> Result<SqlitePool> { 
-    let connect_options = SqliteConnectOptions::from_str(database_url)
-        .with_context(|| format!("failed to parse database_url: '{}'", database_url))? // Closure for lazy eval
-        .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+pub async fn initialize_database(database_url: &str) -> Result<PgPool> {
+    let options = PgConnectOptions::from_str(database_url)
+        .with_context(|| format!("failed to parse database_url: '{}'", database_url))?;
 
-    let pool = SqlitePool::connect_with(connect_options).await
-        .with_context(|| "failed to connect to database")?;
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect_with(options)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to connect to postgresql database at {}",
+                database_url
+            )
+        })?;
 
-    tracing::info!("running database migrations from db.rs...");
+    tracing::info!("running database migrations (postgresql)... ");
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .with_context(|| "failed to run database migrations")?;
-    tracing::info!("database migrations complete (from db.rs).");
+    tracing::info!("database migrations complete (postgresql).");
 
     Ok(pool)
 }
 
 // Upsert a user: insert if not exists (based on telegram_id), or update if exists.
 // Returns the local database ID of the user.
-pub async fn upsert_user(pool: &SqlitePool, user_data: &TelegramUser) -> Result<i64> { 
-    let existing_user_id: Option<i64> = sqlx::query("SELECT id FROM users WHERE telegram_id = ?1")
-        .bind(user_data.id)
-        .fetch_optional(pool)
-        .await
-        .with_context(|| format!("failed to fetch user for upsert, telegram_id: {}", user_data.id))?
-        .map(|row: sqlx::sqlite::SqliteRow| row.get::<'_, i64, _>("id")); // Explicit type for row and get
+pub async fn upsert_user(pool: &PgPool, user_data: &TelegramUser) -> Result<i32> {
+    let query_result = sqlx::query!(
+        r#"
+        INSERT INTO users (telegram_id, username, first_name, last_name, is_bot, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, now(), now())
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            username = EXCLUDED.username,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            is_bot = EXCLUDED.is_bot,
+            updated_at = now()
+        RETURNING id;
+        "#,
+        user_data.id,
+        user_data.username,
+        user_data.first_name,
+        user_data.last_name,
+        user_data.is_bot
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("failed to upsert user with telegram_id {}", user_data.id))?;
 
-    if let Some(id) = existing_user_id {
-        // User exists, update it
-        sqlx::query(
-            "UPDATE users SET username = ?1, first_name = ?2, last_name = ?3, is_bot = ?4, updated_at = CURRENT_TIMESTAMP WHERE id = ?5",
-        )
-        .bind(&user_data.username)
-        .bind(&user_data.first_name)
-        .bind(&user_data.last_name)
-        .bind(user_data.is_bot)
-        .bind(id)
-        .execute(pool)
-        .await
-        .with_context(|| format!("failed to update user with telegram_id {}", user_data.id))?;
-        Ok(id)
-    } else {
-        // User does not exist, insert it
-        let result = sqlx::query(
-            "INSERT INTO users (telegram_id, username, first_name, last_name, is_bot) VALUES (?1, ?2, ?3, ?4, ?5)",
-        )
-        .bind(user_data.id)
-        .bind(&user_data.username)
-        .bind(&user_data.first_name)
-        .bind(&user_data.last_name)
-        .bind(user_data.is_bot)
-        .execute(pool)
-        .await
-        .with_context(|| format!("failed to insert user with telegram_id {}", user_data.id))?;
-        Ok(result.last_insert_rowid())
-    }
+    Ok(query_result.id)
 }
 
 // Upsert a chat: insert if not exists (based on telegram_id), or update if exists.
 // Returns the local database ID of the chat.
-pub async fn upsert_chat(pool: &SqlitePool, chat_data: &TelegramChat) -> Result<i64> { 
-    let existing_chat_id: Option<i64> = sqlx::query("SELECT id FROM chats WHERE telegram_id = ?1")
-        .bind(chat_data.id)
-        .fetch_optional(pool)
-        .await
-        .with_context(|| format!("failed to fetch chat for upsert, telegram_id: {}", chat_data.id))?
-        .map(|row: sqlx::sqlite::SqliteRow| row.get::<'_, i64, _>("id")); // Explicit type for row and get
+pub async fn upsert_chat(pool: &PgPool, chat_data: &TelegramChat) -> Result<i32> {
+    let query_result = sqlx::query!(
+        r#"
+        INSERT INTO chats (telegram_id, type, title, username, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, now(), now())
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            type = EXCLUDED.type,
+            title = EXCLUDED.title,
+            username = EXCLUDED.username,
+            updated_at = now()
+        RETURNING id;
+        "#,
+        chat_data.id,
+        chat_data.chat_type,
+        chat_data.title,
+        chat_data.username
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
 
-    if let Some(id) = existing_chat_id {
-        // Chat exists, update it (already correctly omits first_name, last_name)
-        sqlx::query(
-            "UPDATE chats SET type = ?1, title = ?2, username = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
-        )
-        .bind(&chat_data.chat_type)
-        .bind(&chat_data.title)
-        .bind(&chat_data.username) 
-        .bind(id)
-        .execute(pool)
-        .await
-        .with_context(|| format!("failed to update chat with telegram_id {}", chat_data.id))?;
-        Ok(id)
-    } else {
-        // Chat does not exist, insert it (remove first_name, last_name)
-        let result = sqlx::query(
-            "INSERT INTO chats (telegram_id, type, title, username) VALUES (?1, ?2, ?3, ?4)", // Removed first_name, last_name
-        )
-        .bind(chat_data.id)
-        .bind(&chat_data.chat_type)
-        .bind(&chat_data.title)
-        .bind(&chat_data.username)
-        .execute(pool)
-        .await
-        .with_context(|| format!("failed to insert chat with telegram_id {}", chat_data.id))?;
-        Ok(result.last_insert_rowid())
-    }
+    Ok(query_result.id)
 }
-
 
 // Insert a message. If it already exists (based on UNIQUE(chat_id, telegram_message_id)), ignore the insert.
 // Returns the local database ID of the message (either newly inserted or existing if ignored, though a return of 0 from last_insert_rowid() after IGNORE typically means no new row was inserted).
 // For simplicity, we will return the last_insert_rowid. If it's 0 after an IGNORE, the calling code should understand no new row was made.
 // A more robust way would be to SELECT the ID after an INSERT OR IGNORE if a consistent ID is always needed.
 pub async fn insert_message(
-    pool: &SqlitePool, 
-    message_data: &TelegramMessage, 
-    local_chat_id: i64, 
-    local_user_id: i64, 
-    raw_message_json: &str
-) -> Result<i64> { 
-    let sent_at_datetime = DateTime::<Utc>::from_timestamp(message_data.date, 0)
-        .with_context(|| format!("failed to convert telegram message date {} to NaiveDateTime", message_data.date))?;
+    pool: &PgPool,
+    message_data: &TelegramMessage,
+    local_chat_id: i32,
+    local_user_id: i32,
+    raw_message_json: &str,
+) -> Result<i32> {
+    let sent_at_datetime =
+        DateTime::<Utc>::from_timestamp(message_data.date, 0).with_context(|| {
+            format!(
+                "failed to convert telegram message date {} to naivedatetime",
+                message_data.date
+            )
+        })?;
 
-    // Using INSERT OR IGNORE to handle potential duplicates based on UNIQUE(chat_id, telegram_message_id)
-    let result = sqlx::query(
-        "INSERT OR IGNORE INTO messages (telegram_message_id, chat_id, sender_id, text, sent_at, raw_message) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    let insert_result = sqlx::query!(
+        r#"
+        INSERT INTO messages (telegram_message_id, chat_id, sender_id, text, sent_at, raw_message, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, now())
+        ON CONFLICT (chat_id, telegram_message_id) DO NOTHING
+        RETURNING id;
+        "#,
+        message_data.message_id,
+        local_chat_id,
+        local_user_id,
+        message_data.text,
+        sent_at_datetime,
+        raw_message_json
     )
-    .bind(message_data.message_id)
-    .bind(local_chat_id)
-    .bind(local_user_id)
-    .bind(&message_data.text)
-    .bind(sent_at_datetime)
-    .bind(raw_message_json)
-    .execute(pool)
+    .fetch_optional(pool)
     .await
-    .with_context(|| format!("failed to execute insert_or_ignore for message with telegram_message_id {}", message_data.message_id))?;
+    .with_context(|| format!("failed to execute insert_or_do_nothing for message with telegram_message_id {}", message_data.message_id))?;
 
-    // If rows_affected is 0, it means the IGNORE clause was triggered because the row already existed.
-    // last_insert_rowid() might return 0 in this case for SQLite, or the ID of the conflicting row.
-    // If a new row was inserted, it returns the new ID.
-    if result.rows_affected() > 0 {
-        tracing::debug!(telegram_message_id = message_data.message_id, chat_id = local_chat_id, "new message inserted, row_id: {}", result.last_insert_rowid());
+    if let Some(row) = insert_result {
+        tracing::debug!(
+            telegram_message_id = message_data.message_id,
+            chat_id = local_chat_id,
+            "new message inserted, row_id: {}",
+            row.id
+        );
+        Ok(row.id)
     } else {
-        tracing::debug!(telegram_message_id = message_data.message_id, chat_id = local_chat_id, "message already existed, insert ignored.");
-        // If we need the ID of the *existing* ignored row, we'd have to SELECT it here.
-        // For now, returning last_insert_rowid() which might be 0 or the conflicting row's ID is acceptable if the handler knows this.
-        // A more robust approach if ID is always needed: query for it after ignore.
-        // Let's query it to be safe and consistent, so the handler always gets a valid local ID.
-        let existing_or_new_id = sqlx::query_scalar(
-            "SELECT id FROM messages WHERE telegram_message_id = ?1 AND chat_id = ?2"
+        tracing::debug!(
+            telegram_message_id = message_data.message_id,
+            chat_id = local_chat_id,
+            "message already existed, insert ignored. fetching existing id."
+        );
+        let existing_row = sqlx::query!(
+            "SELECT id FROM messages WHERE telegram_message_id = $1 AND chat_id = $2",
+            message_data.message_id,
+            local_chat_id
         )
-        .bind(message_data.message_id)
-        .bind(local_chat_id)
         .fetch_one(pool)
         .await
-        .with_context(|| format!("Failed to fetch ID for message (tg_id: {}, chat_id: {}) after insert_or_ignore", message_data.message_id, local_chat_id))?;
-        return Ok(existing_or_new_id);
+        .with_context(|| format!("failed to fetch id for existing message (tg_id: {}, chat_id: {}) after insert_or_do_nothing", message_data.message_id, local_chat_id))?;
+        Ok(existing_row.id)
     }
-
-    Ok(result.last_insert_rowid())
-} 
+}

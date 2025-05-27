@@ -1,16 +1,16 @@
 services:
-  test_db:
+  postgres:
     image: postgres:16
-    container_name: lexi_test_postgres
+    container_name: lexi_psql
     environment:
-      POSTGRES_USER: test_user
-      POSTGRES_PASSWORD: test_password
-      POSTGRES_DB: test_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: lexi
     ports:
-      - "5433:5432" # Expose on host port 5433 to avoid conflict with default 5432
+      - "5432:5432"
     volumes:
-      - postgres_test_data:/var/lib/postgresql/data
+      - psql_data:/var/lib/postgresql/data
 
 volumes:
-  postgres_test_data:
+  psql_data:
     driver: local 

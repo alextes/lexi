@@ -1,8 +1,9 @@
 pub mod db;
+pub mod env;
 pub mod handler;
-pub mod telegram_client;
+pub mod log;
+pub mod telegram;
 pub mod tools;
-pub mod types;
 
 use anyhow::{Context, Result}; // Use anyhow::Result
 use async_openai::{
@@ -10,18 +11,18 @@ use async_openai::{
     Client as OpenAIClient,
 };
 use reqwest::Client as ReqwestClient;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
 pub async fn run_bot_loop(
-    pool: SqlitePool,
+    pool: PgPool,
     bot_token: String,
     http_client: ReqwestClient,
     openai_client: OpenAIClient<OpenAIConfig>, // Specify generic
-    bot_db_id: i64,                            // Added bot's own database ID
+    bot_db_id: i32,                            // Changed from i64 to i32
 ) -> Result<()> {
     let mut last_update_id = 0;
     info!(bot_db_id, "bot loop started. listening for updates..."); // Log bot_db_id
@@ -50,7 +51,7 @@ pub async fn run_bot_loop(
         let status = response.status();
         if status.is_success() {
             let api_response = response
-                .json::<types::ApiResponse<Vec<types::Update>>>()
+                .json::<telegram::types::ApiResponse<Vec<telegram::types::Update>>>()
                 .await
                 .with_context(|| "failed to parse json response from getUpdates")?;
 
