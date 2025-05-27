@@ -8,7 +8,7 @@ name = "lexi"
 
 [[bin]]
 name = "lexi"
-path = "src/bin/bot.rs"
+path = "src/bin/lexi.rs"
 
 [[bin]]
 name = "ai_tool_cli"
