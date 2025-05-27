@@ -1,4 +1,4 @@
 /target
 
-# Database files
-db/
+# env vars
+.env
