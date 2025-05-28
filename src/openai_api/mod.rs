@@ -1,7 +1,6 @@
-use eyre::{Context, Result};
+use eyre::{eyre, Context, Result};
 use reqwest::Client as ReqwestClient;
-use serde_json::{json, Map as SerdeJsonMap, Value as JsonValue};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub mod types;
 pub use types::*;
@@ -14,76 +13,88 @@ pub async fn call_responses_api<'a>(
     input_items: Vec<InputItem>,
     args: CallResponsesApiOptionalArgs<'a>,
 ) -> Result<OpenAiApiResponse> {
+    let request_payload = serde_json::json!({
+        "input": input_items,
+        "model": args.model_id,
+        "previous_response_id": args.previous_response_id,
+        "tools": args.tools,
+        "tool_choice": args.tool_choice,
+        "instructions": args.instructions,
+        "temperature": args.temperature,
+        "store": args.store,
+    });
+
+    let endpoint_url = OPENAI_RESPONSES_API_URL;
     info!(
-        url = OPENAI_RESPONSES_API_URL,
-        model = args.model_id,
-        previous_id = args.previous_response_id,
+        url = %endpoint_url,
+        model = %args.model_id,
+        previous_id = ?args.previous_response_id,
         input_items_count = input_items.len(),
         tools_count = args.tools.as_ref().map_or(0, |t| t.len()),
-        "attempting to call openai /v1/responses endpoint"
+        "attempting to call openai {} endpoint", "/v1/responses"
     );
 
-    let mut payload_map = SerdeJsonMap::new();
-    payload_map.insert("input".to_string(), json!(input_items));
-    payload_map.insert("model".to_string(), json!(args.model_id));
-
-    if let Some(prev_id) = args.previous_response_id {
-        payload_map.insert("previous_response_id".to_string(), json!(prev_id));
-    }
-    if let Some(tls) = args.tools {
-        payload_map.insert("tools".to_string(), json!(tls));
-    }
-    if let Some(tc) = args.tool_choice {
-        payload_map.insert("tool_choice".to_string(), tc);
-    }
-    if let Some(instr) = args.instructions {
-        payload_map.insert("instructions".to_string(), json!(instr));
-    }
-    if let Some(temp) = args.temperature {
-        payload_map.insert("temperature".to_string(), json!(temp));
-    }
-    if let Some(s) = args.store {
-        payload_map.insert("store".to_string(), json!(s));
-    }
-
-    let request_payload = JsonValue::Object(payload_map);
-
-    debug!(payload = ?request_payload, "sending payload to /v1/responses api");
-
     let response = http_client
-        .post(OPENAI_RESPONSES_API_URL)
+        .post(endpoint_url)
         .bearer_auth(api_key)
         .header("Content-Type", "application/json")
         .json(&request_payload)
         .send()
         .await
-        .context("failed to send request to openai /v1/responses endpoint")?;
+        .context("failed to send request to openai api")?;
 
-    let status = response.status();
+    let response_status = response.status();
     let response_text = response
         .text()
         .await
-        .context("failed to read response text from openai /v1/responses endpoint")?;
+        .context("failed to read response text from openai api")?;
 
-    if status.is_success() {
-        info!(
-            status = %status,
-            raw_response_preview = &response_text[..std::cmp::min(response_text.len(), 500)],
-            "successfully received response from /v1/responses"
-        );
-        let parsed_response: OpenAiApiResponse = serde_json::from_str(&response_text)
-            .wrap_err_with(|| format!("failed to deserialize openai /v1/responses json. response text: {}\nensure structs match api response.", response_text))?;
-        Ok(parsed_response)
+    if response_status.is_success() {
+        match serde_json::from_str::<OpenAiApiResponse>(&response_text) {
+            Ok(api_response) => {
+                // Temporary debug logging for the full response
+                dbg!(api_response.clone());
+
+                info!(
+                    status = %response_status,
+                    id = %api_response.id,
+                    object = %api_response.object,
+                    "successfully received response from {} status={} id={} type={}",
+                    "/v1/responses",
+                    response_status,
+                    api_response.id,
+                    api_response.object
+                );
+                Ok(api_response)
+            }
+            Err(e) => {
+                error!(
+                    status = %response_status,
+                    response_body = %response_text,
+                    error = %e,
+                    "failed to deserialize successful openai api response for {}", "/v1/responses"
+                );
+                Err(eyre!(
+                    "failed to deserialize openai api response (status {}): {}. response body: {}",
+                    response_status,
+                    e,
+                    response_text
+                ))
+            }
+        }
     } else {
         error!(
-            status = %status,
-            response_body = response_text,
-            "error response from openai /v1/responses endpoint"
+            status = %response_status,
+            response_body = %response_text,
+            "error response from openai {} endpoint", "/v1/responses"
         );
-        Err(eyre::eyre!(
-            "openai /v1/responses api call failed with status {}: {}. response: {}",
-            status,
-            status.canonical_reason().unwrap_or("unknown error"),
+        Err(eyre!(
+            "openai {} api call failed with status {}: {}. response: {}",
+            "/v1/responses",
+            response_status,
+            response_status
+                .canonical_reason()
+                .unwrap_or("unknown status"),
             response_text
         ))
     }
@@ -265,7 +276,7 @@ mod tests {
             function_call_item.name, function_call_item.arguments
         );
 
-        let arguments_json: JsonValue = serde_json::from_str(&function_call_item.arguments)
+        let arguments_json: serde_json::Value = serde_json::from_str(&function_call_item.arguments)
             .expect("failed to parse function call arguments");
         let sql_query_from_model = arguments_json
             .get("sql_query")
@@ -276,7 +287,7 @@ mod tests {
             sql_query_from_model
         );
 
-        let mock_sql_result = json!({
+        let mock_sql_result = serde_json::json!({
             "status": "success",
             "message": "query executed successfully.",
             "results": [{"email": "alpha@simpletest.com", "username": "simple_alpha"}]

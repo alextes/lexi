@@ -48,6 +48,7 @@ pub enum InputItem {
     Text(String),
     Message(InputMessageObject),
     FunctionCallOutput(FunctionCallOutputItem),
+    FunctionCallEcho(FunctionCallEchoItem),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -62,6 +63,16 @@ pub struct FunctionCallOutputItem {
     pub call_id: String,
     pub output: String,
 }
+
+// --- new struct ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FunctionCallEchoItem {
+    pub r#type: String, // will be "function_call"
+    pub call_id: String,
+    pub name: String,
+    pub arguments: String,
+}
+// --- end new struct ---
 
 // --- structs for deserializing api responses ---
 

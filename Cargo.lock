@@ -1256,6 +1256,7 @@ dependencies = [
  "color-eyre",
  "dotenv",
  "eyre",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",

@@ -1,7 +1,7 @@
-use super::common::{handle_tool_call_step2_openai_response, ToolStep2Context};
 use crate::message_processor::HandlerContext;
-use crate::openai_api::{InputItem, OutputFunctionCall, ToolDefinition};
+use crate::openai_api::{ToolDefinition, ToolFunctionParameters};
 use eyre::Result;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -10,8 +10,14 @@ use tracing::{error, info, warn};
 pub const MEVDB_SCHEMA_TOOL_NAME: &str = "get_mevdb_schema";
 const MEVDB_SCHEMA_FILE_PATH: &str = "src/message_processor/tools/mevdb_schema.txt";
 
-// --- tool definition ---
 pub static MEVDB_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
+    // Define empty parameters object as required by OpenAI for no-arg functions
+    let tool_params = ToolFunctionParameters {
+        r#type: "object".to_string(),
+        properties: HashMap::new(),   // No properties
+        required: Some(Vec::new()),   // Changed from None to Some(Vec::new())
+        additional_properties: false, // Must be false
+    };
     ToolDefinition {
         r#type: "function".to_string(),
         name: MEVDB_SCHEMA_TOOL_NAME.to_string(),
@@ -19,12 +25,11 @@ pub static MEVDB_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
             "retrieves the schema definition for the mev (maximal extractable value) database. this can be used to understand table structures before forming a query for the 'execute_mevdb_query' tool."
                 .to_string(),
         ),
-        parameters: None, // No parameters for this tool
+        parameters: Some(tool_params),
         strict: Some(true),
     }
 });
 
-// --- tool execution logic ---
 fn get_mevdb_schema_from_file() -> Result<String> {
     info!(
         "attempting to read mevdb schema from file: {}",
@@ -36,42 +41,26 @@ fn get_mevdb_schema_from_file() -> Result<String> {
     })
 }
 
-// --- tool call handling ---
-pub async fn handle_mevdb_schema_tool_call(
-    ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64,
-    function_call: &OutputFunctionCall,
-    original_input_items: Vec<InputItem>,
-    initial_api_response_id: &str,
-    available_tools: Vec<ToolDefinition>,
-    instructions: &str,
-) -> Result<(String, String)> {
+// --- new simplified tool execution function ---
+pub async fn execute_get_mevdb_schema(
+    _ctx: &HandlerContext<'_>, // Context might be needed for future enhancements (e.g. dynamic schema)
+    telegram_chat_id: i64,     // For logging
+) -> Result<String> {
+    // Returns the schema string or an error string
     info!(
         chat_id = telegram_chat_id,
-        "received call for {}", function_call.name
+        "executing get_mevdb_schema tool"
     );
 
-    let schema_result = get_mevdb_schema_from_file();
-    let schema_string = match schema_result {
-        Ok(s) => s,
+    match get_mevdb_schema_from_file() {
+        Ok(s) => Ok(s),
         Err(e) => {
             warn!(chat_id = telegram_chat_id, error = %e, "error getting mevdb schema for tool call");
-            format!("error retrieving mevdb schema: {}", e)
+            // Return a JSON string indicating the error, as OpenAI expects a JSON string from tools
+            Ok(format!(
+                "{{\"error\": \"failed_to_read_schema\", \"details\": \"{}\"}}",
+                e.to_string().replace('"', "\\\"") // Basic JSON escaping for the error message
+            ))
         }
-    };
-
-    let step2_ctx = ToolStep2Context {
-        telegram_chat_id,
-        function_name: &function_call.name,
-        function_id: &function_call.id,
-        function_call_id: &function_call.call_id,
-        function_arguments: &function_call.arguments, // Will be empty or null for this tool
-        original_input_items,
-        initial_api_response_id,
-        available_tools,
-        instructions,
-        tool_output_json_string: schema_string, // Send the schema (or error) as a string
-    };
-
-    handle_tool_call_step2_openai_response(ctx, step2_ctx).await
+    }
 }

@@ -1,12 +1,14 @@
-use super::common::handle_tool_call_step2_openai_response;
-use super::common::ToolStep2Context;
+// use super::common::handle_tool_call_step2_openai_response; // Removed
+// use super::common::ToolStep2Context; // Removed
 use crate::env::ENV_CONFIG;
+// use crate::message_processor::openai_chat::process_openai_response; // Removed
 use crate::message_processor::HandlerContext;
 use crate::openai_api::{
-    InputItem, OutputFunctionCall, ToolDefinition, ToolFunctionParameterProperty,
+    /* InputItem, OutputFunctionCall, */ ToolDefinition,
+    ToolFunctionParameterProperty, // InputItem, OutputFunctionCall removed
     ToolFunctionParameters,
 };
-use eyre::{eyre, Context, Result};
+use eyre::{eyre, Context, Result}; // eyre, Context might be unused now, will check next
 use reqwest::Client as ReqwestClient;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
@@ -84,6 +86,62 @@ async fn fetch_beacon_header(
     }
 }
 
+pub async fn execute_beacon_slot_check(
+    ctx: &HandlerContext<'_>,
+    telegram_chat_id: i64,    // For logging
+    arguments_json_str: &str, // The arguments string from OutputFunctionCall
+) -> Result<String> {
+    // Returns a JSON string (SlotStatus or error)
+    info!(chat_id = telegram_chat_id, args = %arguments_json_str, "executing check_beacon_slot_missed tool");
+
+    let beacon_node_url = match ENV_CONFIG.beacon_url.as_ref() {
+        Some(url) => url.as_str(),
+        None => {
+            let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
+            error!(chat_id = telegram_chat_id, err_msg);
+            return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
+        }
+    };
+
+    match serde_json::from_str::<HashMap<String, JsonValue>>(arguments_json_str) {
+        Ok(args_map) => {
+            if let Some(slot_value) = args_map.get("slot_number") {
+                if let Some(slot_number) = slot_value.as_u64() {
+                    info!(
+                        chat_id = telegram_chat_id,
+                        slot = slot_number,
+                        "checking beacon slot from ai request"
+                    );
+                    match fetch_beacon_header(ctx.http_client, beacon_node_url, slot_number).await {
+                        Ok(status) => Ok(status.to_json_string()),
+                        Err(e) => {
+                            warn!(chat_id = telegram_chat_id, slot = slot_number, error = %e, "error fetching beacon header");
+                            Ok(SlotStatus::Error(format!(
+                                "error checking slot {}: {}",
+                                slot_number, e
+                            ))
+                            .to_json_string())
+                        }
+                    }
+                } else {
+                    let err_msg = "argument 'slot_number' was not a valid u64";
+                    warn!(chat_id = telegram_chat_id, args = %arguments_json_str, err_msg);
+                    Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
+                }
+            } else {
+                let err_msg = "argument 'slot_number' missing";
+                warn!(chat_id = telegram_chat_id, args = %arguments_json_str, err_msg);
+                Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("failed to parse arguments json: {}", e);
+            warn!(chat_id = telegram_chat_id, args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            Ok(SlotStatus::Error(err_msg).to_json_string())
+        }
+    }
+}
+
 pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     let mut params_props = HashMap::new();
     params_props.insert(
@@ -111,82 +169,3 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         strict: Some(true),
     }
 });
-
-pub async fn handle_beacon_slot_check_tool_call(
-    ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64,
-    function_call: &OutputFunctionCall,
-    original_input_items: Vec<InputItem>,
-    initial_api_response_id: &str,
-    available_tools: Vec<ToolDefinition>,
-    instructions: &str,
-) -> Result<(String, String)> {
-    info!(chat_id = telegram_chat_id, args = %function_call.arguments, "received call for {}", function_call.name);
-
-    let beacon_node_url = ENV_CONFIG
-        .beacon_url
-        .as_ref()
-        .expect("BEACON_URL must be set to use the beacon slot check tool");
-
-    match serde_json::from_str::<HashMap<String, JsonValue>>(&function_call.arguments) {
-        Ok(args_map) => {
-            if let Some(slot_value) = args_map.get("slot_number") {
-                if let Some(slot_number) = slot_value.as_u64() {
-                    info!(slot = slot_number, "checking beacon slot from ai request");
-
-                    let slot_status_result = fetch_beacon_header(
-                        ctx.http_client,
-                        beacon_node_url, // Now a &str from .as_ref().expect()
-                        slot_number,
-                    )
-                    .await;
-
-                    let result_json_str = match slot_status_result {
-                        Ok(status) => status.to_json_string(),
-                        Err(e) => SlotStatus::Error(e.to_string()).to_json_string(),
-                    };
-
-                    let step2_ctx = ToolStep2Context {
-                        telegram_chat_id,
-                        function_name: &function_call.name,
-                        function_id: &function_call.id,
-                        function_call_id: &function_call.call_id,
-                        function_arguments: &function_call.arguments,
-                        original_input_items,
-                        initial_api_response_id,
-                        available_tools,
-                        instructions,
-                        tool_output_json_string: result_json_str,
-                    };
-
-                    handle_tool_call_step2_openai_response(ctx, step2_ctx).await
-                } else {
-                    warn!(
-                        chat_id = telegram_chat_id,
-                        "'slot_number' was not a valid u64 in {} args", function_call.name
-                    );
-                    Err(eyre!(
-                        "argument 'slot_number' was not a valid u64 for tool {}",
-                        function_call.name
-                    ))
-                }
-            } else {
-                warn!(
-                    chat_id = telegram_chat_id,
-                    "'slot_number' missing in {} args", function_call.name
-                );
-                Err(eyre!(
-                    "argument 'slot_number' missing for tool {}",
-                    function_call.name
-                ))
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to parse args for {}", function_call.name);
-            Err(e).context(format!(
-                "failed to parse args for tool {}",
-                function_call.name
-            ))
-        }
-    }
-}

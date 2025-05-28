@@ -234,3 +234,20 @@ pub async fn update_last_openai_response_id(
     })?;
     Ok(())
 }
+
+// clears the last_openai_response_id (sets to null) for a given chat.
+pub async fn clear_last_openai_response_id(pool: &PgPool, local_chat_id: i32) -> Result<()> {
+    sqlx::query!(
+        "UPDATE chats SET last_openai_response_id = null, updated_at = now() WHERE id = $1",
+        local_chat_id
+    )
+    .execute(pool)
+    .await
+    .wrap_err_with(|| {
+        format!(
+            "failed to clear last_openai_response_id for chat_id {}",
+            local_chat_id
+        )
+    })?;
+    Ok(())
+}

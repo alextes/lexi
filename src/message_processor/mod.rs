@@ -1,21 +1,17 @@
-use crate::openai_api::{
-    call_responses_api, InputItem, InputMessageObject, OutputItem, ToolDefinition,
-
-};
 use crate::telegram::types::{Message as TelegramMessage, Update as TelegramUpdate};
 use crate::{db, telegram};
-use eyre::{Context, Result}; 
+use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use sqlx::PgPool;
 use tracing::{debug, error, info, warn};
 
+pub mod openai_chat;
 pub mod tools;
 
 const BOT_USERNAME: &str = "@lexi_alex_bot";
-const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1-nano";
 
-// Context struct to hold shared resources and configuration
+#[derive(Clone)]
 pub struct HandlerContext<'a> {
     pub pool: &'a PgPool,
     pub http_client: &'a ReqwestClient,
@@ -216,7 +212,7 @@ fn extract_prompt_from_mention(
     text.to_string()
 }
 
-async fn generate_and_send_ai_reply(
+pub async fn generate_and_send_ai_reply(
     ctx: &HandlerContext<'_>,
     incoming_message: &TelegramMessage,
     prompt_text: &str,
@@ -226,104 +222,47 @@ async fn generate_and_send_ai_reply(
         chat_id = incoming_message.chat.id,
         message_id = incoming_message.message_id,
         prompt = prompt_text,
-        "generating ai reply for user: '{}'", prompt_text
+        "generating and sending ai reply for user: '{}'",
+        prompt_text
     );
 
-    let previous_response_id_opt = match db::get_last_openai_response_id(ctx.pool, local_chat_id_for_conversation).await {
-        Ok(id_opt) => id_opt,
-        Err(e) => {
-            warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
-            None
-        }
-    };
-
-    let input_items = vec![InputItem::Message(InputMessageObject {
-        role: "user".to_string(),
-        content: prompt_text.to_string(),
-    })];
-
-    let available_tools = vec![
-        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
-        tools::mevdb_query::MEVDB_QUERY_TOOL.clone(),
-        tools::mevdb_schema::MEVDB_SCHEMA_TOOL.clone(),
-    ];
-    let instructions = format!(
-        "you are a helpful ai assistant named lexi. use tools if appropriate. \
-        you have the following tools available: \
-        1. '{}': checks if an ethereum beacon chain slot was missed. params: 'slot_number' (integer). \
-        2. '{}': executes a sql select query against a read-only mev database. params: 'sql_query' (string). \
-        3. '{}': retrieves the schema for the mev database. use this if you need to understand table structures before using the '{}' tool. this tool takes no parameters. \
-        ensure your queries/parameters target these tools and their specified inputs correctly.",
-        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME, 
-        tools::mevdb_query::MEVDB_TOOL_NAME,
-        tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME,
-        tools::mevdb_query::MEVDB_TOOL_NAME
-    );
-
-    let initial_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
-        model_id: OPENAI_RESPONSES_MODEL_ID,
-        previous_response_id: previous_response_id_opt.as_deref(),
-        tools: Some(available_tools.clone()),
-        tool_choice: None,
-        instructions: Some(&instructions),
-        temperature: None,
-        store: None,
-    };
-
-    match call_responses_api(
-        ctx.http_client,
-        ctx.openai_api_key,
-        input_items.clone(),
-        initial_api_args,
-    ).await {
-        Ok(api_response_1) => {
-            match process_openai_response(
-                ctx, 
+    match openai_chat::generate_ai_reply_content(
+        ctx,
+        incoming_message,
+        prompt_text,
+        local_chat_id_for_conversation,
+    )
+    .await
+    {
+        Ok((final_text, response_id_to_store)) => {
+            send_reply_and_update_state(
+                ctx,
                 incoming_message.chat.id,
-                api_response_1, 
-                input_items, 
-                available_tools,
-                &instructions
-            ).await {
-                Ok((final_text, response_id_to_store)) => {
-                    send_reply_and_update_state(
-                        ctx,
-                        incoming_message.chat.id,
-                        local_chat_id_for_conversation,
-                        &final_text,
-                        &response_id_to_store,
-                    ).await?;
-                }
-                Err(e) => {
-                    error!(chat_id = incoming_message.chat.id, error = %e, "error processing openai response or tool call");
-                    let fallback_text = format!("sorry, an error occurred while processing your request with ai tools: {}", e);
-                    let _ = send_reply_and_update_state(
-                        ctx, 
-                        incoming_message.chat.id, 
-                        local_chat_id_for_conversation, 
-                        &fallback_text, 
-                        previous_response_id_opt.as_deref().unwrap_or("error_no_id_processing")
-                    ).await.map_err(|send_err| {
-                        error!(chat_id = incoming_message.chat.id, error = %send_err, "failed to send even the error fallback message.");
-                    });
-                    return Err(e);
-                }
-            }
+                local_chat_id_for_conversation,
+                &final_text,
+                Some(&response_id_to_store),
+            )
+            .await?;
         }
         Err(e) => {
-            error!(chat_id = incoming_message.chat.id, error = %e, "initial /v1/responses api call failed");
-            let fallback_message_text =
-                "sorry, i encountered an issue calling the ai service.";
+            error!(chat_id = incoming_message.chat.id, error = %e, "error generating ai reply content in generate_and_send_ai_reply");
+            let fallback_text = format!(
+                "sorry, an error occurred while generating the ai reply: {}",
+                e
+            );
             let _ = send_reply_and_update_state(
-                ctx, 
-                incoming_message.chat.id, 
-                local_chat_id_for_conversation, 
-                fallback_message_text, 
-                previous_response_id_opt.as_deref().unwrap_or("error_no_id_initial_call")
-            ).await.map_err(|send_err| {
-                error!(chat_id = incoming_message.chat.id, error = %send_err, "failed to send even the initial api call error fallback message.");
+                ctx,
+                incoming_message.chat.id,
+                local_chat_id_for_conversation,
+                &fallback_text,
+                None,
+            )
+            .await
+            .map_err(|send_err| {
+                error!(chat_id = incoming_message.chat.id, error = %send_err, "failed to send even the error fallback message after content gen failure.");
             });
-            return Err(e);
+            // Propagate the error that caused the fallback
+            return Err(e.into());
         }
     }
     Ok(())
@@ -356,7 +295,7 @@ async fn send_reply_and_update_state(
     telegram_chat_id: i64,     // Telegram's chat ID for sending the message
     local_chat_id_for_db: i32, // Our local DB chat ID
     reply_text: &str,
-    response_id_to_store: &str, // The OpenAI response ID to store for conversation context
+    response_id_to_store: Option<&str>, // Changed to Option<&str>
 ) -> Result<()> {
     info!(
         chat_id = telegram_chat_id,
@@ -394,92 +333,40 @@ async fn send_reply_and_update_state(
         "saved bot final reply to db"
     );
 
-    if let Err(e) = db::update_last_openai_response_id(
-        ctx.pool,
-        local_chat_id_for_db, // Use the local db chat id
-        response_id_to_store,
-    )
-    .await
-    {
-        warn!(chat_id = telegram_chat_id, response_id = response_id_to_store, error = %e, "failed to update last_openai_response_id for chat.");
-        // Not returning an error here, as sending the message was successful.
-        // Logging the failure to update state is important, though.
+    match response_id_to_store {
+        Some(id_to_store) if !id_to_store.starts_with("error_no_id") => {
+            if let Err(e) = db::update_last_openai_response_id(
+                ctx.pool,
+                local_chat_id_for_db, // Use the local db chat id
+                id_to_store,
+            )
+            .await
+            {
+                warn!(chat_id = telegram_chat_id, response_id = id_to_store, error = %e, "failed to update last_openai_response_id for chat.");
+            }
+        }
+        _ => {
+            // Handles None or placeholder error IDs
+            warn!(
+                chat_id = telegram_chat_id,
+                "no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for chat."
+            );
+            if let Err(e) = db::clear_last_openai_response_id(ctx.pool, local_chat_id_for_db).await
+            {
+                error!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id for chat after an issue.");
+            }
+        }
     }
     Ok(())
 }
 
-// Helper function to process the initial API response and decide next steps
-async fn process_openai_response(
+// new function specifically for cli testing - bypasses db lookups for previous_response_id
+pub async fn process_single_prompt_for_cli(
     ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64, 
-    api_response_1: crate::openai_api::OpenAiApiResponse, 
-    original_input_items: Vec<InputItem>,
-    available_tools: Vec<ToolDefinition>,
-    instructions: &str,
+    prompt_text: &str,
+    telegram_chat_id: i64, // for logging consistency in tool handlers
 ) -> Result<(String, String)> {
-    let response_1_id = api_response_1.id.clone();
-
-    if let Some(output_item) = api_response_1.output.first() {
-        match output_item {
-            OutputItem::Message(msg) => {
-                if msg.role == "assistant" {
-                    if let Some(text_content) = msg.content.first() {
-                        if text_content.r#type == "output_text" {
-                            return Ok((text_content.text.clone(), response_1_id));
-                        }
-                    }
-                }
-                warn!(chat_id = telegram_chat_id, "no direct assistant text in first response: {:?}", msg);
-                Ok(("i received a response from the ai, but couldn't understand it fully.".to_string(), response_1_id))
-            }
-            OutputItem::FunctionCall(fc) => {
-                if fc.name == tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
-                    return tools::beacon_slot_check::handle_beacon_slot_check_tool_call(
-                        ctx,
-                        telegram_chat_id,
-                        fc,
-                        original_input_items,
-                        &response_1_id,
-                        available_tools,
-                        instructions,
-                    ).await;
-                } else if fc.name == tools::mevdb_query::MEVDB_TOOL_NAME {
-                    return tools::mevdb_query::handle_mevdb_query_tool_call(
-                        ctx,
-                        telegram_chat_id,
-                        fc,
-                        original_input_items,
-                        &response_1_id,
-                        available_tools,
-                        instructions,
-                    ).await;
-                } else if fc.name == tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME {
-                    return tools::mevdb_schema::handle_mevdb_schema_tool_call(
-                        ctx,
-                        telegram_chat_id,
-                        fc,
-                        original_input_items,
-                        &response_1_id,
-                        available_tools,
-                        instructions,
-                    ).await;
-                } else {
-                    warn!(chat_id = telegram_chat_id, function_call = ?fc, "main handler received unexpected function call name");
-                    Ok((
-                        format!(
-                            "i tried to use an unexpected tool: {}. something went wrong.",
-                            fc.name
-                        ),
-                        response_1_id,
-                    ))
-                }
-            }
-        }
-    } else {
-        warn!(chat_id = telegram_chat_id, "api response output was empty. response_id: {}", response_1_id);
-        Ok((
-            "i received an empty response from the ai.".to_string(),
-            response_1_id,
-        ))
-    }
-} 
+    // Returns (final_text, response_id_from_initial_call)
+    // Delegate to the new openai_chat module function
+    openai_chat::process_single_prompt_for_cli(ctx, prompt_text, telegram_chat_id).await
+}

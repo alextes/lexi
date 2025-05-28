@@ -59,7 +59,8 @@ pub async fn run_bot_loop(
                         last_update_id = update.update_id;
                         debug!(raw_update_object = ?update, "main loop: received update object from api");
 
-                        message_processor::process_update(
+                        // Process each update; if an error occurs, log it and continue.
+                        if let Err(e) = message_processor::process_update(
                             &pool,
                             &update,
                             &http_client,
@@ -69,9 +70,15 @@ pub async fn run_bot_loop(
                             &openai_api_key,
                         )
                         .await
-                        .wrap_err_with(|| {
-                            format!("error processing update_id: {}", update.update_id)
-                        })?;
+                        {
+                            error!(
+                                update_id = update.update_id,
+                                error = %e,
+                                "failed to process update. continuing to next update."
+                            );
+                            // A more detailed error, including context, could be logged if needed.
+                            // For example, by using: error!(error = format!("{:?}", e), ...)
+                        }
                     }
                 } else {
                     trace!("api response ok, but no updates array in result.");
