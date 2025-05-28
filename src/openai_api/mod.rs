@@ -1,155 +1,10 @@
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as SerdeJsonMap, Value as JsonValue};
-use std::collections::HashMap;
 use tracing::{debug, error, info};
 
-// --- Structs for API Request Payloads ---
-
-#[derive(Serialize, Debug, Clone)]
-pub struct CallResponsesApiOptionalArgs<'a> {
-    pub model_id: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_response_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ToolDefinition>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub store: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ToolFunctionParameterProperty {
-    pub r#type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#enum: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ToolFunctionParameters {
-    pub r#type: String,
-    pub properties: HashMap<String, ToolFunctionParameterProperty>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub required: Option<Vec<String>>,
-    #[serde(rename = "additionalProperties")]
-    pub additional_properties: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ToolDefinition {
-    pub r#type: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<ToolFunctionParameters>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub strict: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum InputItem {
-    Text(String),
-    Message(InputMessageObject),
-    FunctionCallOutput(FunctionCallOutputItem),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct InputMessageObject {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FunctionCallOutputItem {
-    pub r#type: String,
-    pub call_id: String,
-    pub output: String,
-}
-
-// --- Structs for Deserializing API Responses ---
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct OutputTextContent {
-    pub r#type: String,
-    pub text: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct OutputFunctionCall {
-    pub r#type: String,
-    pub id: String,
-    pub call_id: String,
-    pub name: String,
-    pub arguments: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum OutputItem {
-    Message(OutputMessage),
-    FunctionCall(OutputFunctionCall),
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct OutputMessage {
-    pub id: String,
-    pub r#type: String,
-    pub status: String,
-    pub role: String,
-    pub content: Vec<OutputTextContent>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct OpenAiApiResponse {
-    pub id: String,
-    pub object: String,
-    pub created_at: i64,
-    pub model: String,
-    pub status: String,
-    pub output: Vec<OutputItem>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub background: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub incomplete_details: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parallel_tool_calls: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_response_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub service_tier: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub store: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, String>>,
-}
+pub mod types;
+pub use types::*;
 
 const OPENAI_RESPONSES_API_URL: &str = "https://api.openai.com/v1/responses";
 
@@ -217,7 +72,7 @@ pub async fn call_responses_api<'a>(
             "successfully received response from /v1/responses"
         );
         let parsed_response: OpenAiApiResponse = serde_json::from_str(&response_text)
-            .wrap_err_with(|| format!("failed to deserialize openai /v1/responses json. response text: {}\nEnsure structs match API response.", response_text))?;
+            .wrap_err_with(|| format!("failed to deserialize openai /v1/responses json. response text: {}\nensure structs match api response.", response_text))?;
         Ok(parsed_response)
     } else {
         error!(
@@ -238,6 +93,7 @@ pub async fn call_responses_api<'a>(
 mod tests {
     use super::*;
     use reqwest::Client as ReqwestClient;
+    use std::collections::HashMap;
     use std::env;
 
     #[tokio::test]
@@ -337,7 +193,7 @@ mod tests {
                 description: Some(
                     "the sql select query to execute. must start with 'select'.".to_string(),
                 ),
-                r#enum: None,
+                r#enum: Vec::new(),
             },
         );
         let tool_params = ToolFunctionParameters {

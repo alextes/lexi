@@ -1,54 +1,28 @@
-// use crate::openai_direct_api; // Removed as it's unused due to specific imports below
 use crate::openai_api::{
     call_responses_api, InputItem, InputMessageObject, OutputItem, ToolDefinition,
-    ToolFunctionParameterProperty, ToolFunctionParameters,
+
 };
 use crate::telegram::types::{Message as TelegramMessage, Update as TelegramUpdate};
-use crate::{db, telegram, tools::sql_select}; // Added sql_select here for execute_db_query
-use eyre::{eyre, Context, Result};
+use crate::{db, telegram};
+use eyre::{Context, Result}; 
 use reqwest::Client as ReqwestClient;
-use serde_json::to_string as serde_json_to_string; // Removed unused json and JsonValue
+use serde_json::to_string as serde_json_to_string;
 use sqlx::PgPool;
-use std::collections::HashMap;
-use tracing::{debug, error, info, warn}; // For reading environment variables // Add this import // For tool parameters
+use tracing::{debug, error, info, warn};
+
+pub mod tools;
 
 const BOT_USERNAME: &str = "@lexi_alex_bot";
 const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1-nano";
 
 // Context struct to hold shared resources and configuration
-struct HandlerContext<'a> {
-    pool: &'a PgPool,
-    http_client: &'a ReqwestClient,
-    api_base_url: &'a str,
-    bot_token: &'a str,
-    bot_db_id: i32,
-    openai_api_key: &'a str,
-}
-
-// Define the execute_sql_query tool directly for the main AI
-fn create_direct_sql_query_tool() -> ToolDefinition {
-    let mut params_props = HashMap::new();
-    params_props.insert(
-        "sql_query".to_string(),
-        ToolFunctionParameterProperty {
-            r#type: "string".to_string(),
-            description: Some("the sql select query to execute. example: SELECT * FROM users WHERE id = 1. must start with 'select'.".to_string()),
-            r#enum: None,
-        },
-    );
-    let tool_params = ToolFunctionParameters {
-        r#type: "object".to_string(),
-        properties: params_props,
-        required: Some(vec!["sql_query".to_string()]),
-        additional_properties: false,
-    };
-    ToolDefinition {
-        r#type: "function".to_string(),
-        name: sql_select::SQL_TOOL_NAME.to_string(), // Use from sql_select module
-        description: Some("executes a sql select query against the postgresql database and returns the results. only select queries are permitted. attempts to use other query types will result in an error.".to_string()),
-        parameters: Some(tool_params),
-        strict: Some(true),
-    }
+pub struct HandlerContext<'a> {
+    pub pool: &'a PgPool,
+    pub http_client: &'a ReqwestClient,
+    pub api_base_url: &'a str,
+    pub bot_token: &'a str,
+    pub bot_db_id: i32,
+    pub openai_api_key: &'a str,
 }
 
 async fn process_message_content(
@@ -268,7 +242,7 @@ async fn generate_and_send_ai_reply(
         content: prompt_text.to_string(),
     })];
 
-    let available_tools = vec![create_direct_sql_query_tool()];
+    let available_tools = vec![tools::execute_sql_query::SQL_QUERY_TOOL.clone()];
     let instructions = format!(
         "you are a helpful ai assistant named lexi. use tools if appropriate. \
         you have one tool available: '{}'. \
@@ -282,7 +256,7 @@ async fn generate_and_send_ai_reply(
         3. 'messages' (stores messages from chats): \
            columns: id (serial primary key), telegram_message_id (bigint not null), chat_id (integer not null, references chats.id), sender_id (integer not null, references users.id), text (text), sent_at (timestamptz not null), raw_message (text), created_at (timestamptz not null default now()). \
         ensure your queries target these tables and their specified columns correctly. if you use the tool, you will provide the exact sql query to execute.",
-        sql_select::SQL_TOOL_NAME
+        tools::execute_sql_query::SQL_TOOL_NAME
     );
 
     let initial_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
@@ -307,7 +281,7 @@ async fn generate_and_send_ai_reply(
                 incoming_message.chat.id,
                 api_response_1, 
                 input_items, 
-                available_tools,
+                available_tools, // This will be passed to the tool handler
                 &instructions
             ).await {
                 Ok((final_text, response_id_to_store)) => {
@@ -433,103 +407,6 @@ async fn send_reply_and_update_state(
     Ok(())
 }
 
-// Helper function to handle the 'execute_sql_query' tool call flow
-async fn handle_execute_sql_query_tool_call(
-    ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64, // Added for logging
-    function_call: &crate::openai_api::OutputFunctionCall,
-    original_input_items: Vec<InputItem>,
-    initial_api_response_id: &str,
-    available_tools: Vec<ToolDefinition>,
-    instructions: &str,
-) -> Result<(String, String)> {
-    info!(chat_id = telegram_chat_id, args = %function_call.arguments, "handler received call for {}", function_call.name);
-
-    match serde_json::from_str::<HashMap<String, String>>(&function_call.arguments) {
-        Ok(args_map) => {
-            if let Some(sql_query_from_ai) = args_map.get("sql_query") {
-                info!(query = %sql_query_from_ai, "executing sql query from ai");
-
-                let sql_result_json =
-                    sql_select::execute_db_query(ctx.pool, sql_query_from_ai).await;
-
-                let mut inputs_for_step2 = original_input_items;
-                inputs_for_step2.push(InputItem::Message(InputMessageObject {
-                    role: "assistant".to_string(),
-                    content: format!(
-                        "tool_call: name={}, id={}, call_id={}, args={}",
-                        function_call.name,
-                        function_call.id,
-                        function_call.call_id,
-                        function_call.arguments
-                    ),
-                }));
-                inputs_for_step2.push(InputItem::FunctionCallOutput(
-                    crate::openai_api::FunctionCallOutputItem {
-                        r#type: "function_call_output".to_string(),
-                        call_id: function_call.call_id.clone(),
-                        output: sql_result_json.to_string(),
-                    },
-                ));
-
-                info!("(handler) sending function call result back to /v1/responses api");
-                let step2_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
-                    model_id: OPENAI_RESPONSES_MODEL_ID,
-                    previous_response_id: Some(initial_api_response_id),
-                    tools: Some(available_tools),
-                    tool_choice: None,
-                    instructions: Some(instructions),
-                    temperature: None,
-                    store: None,
-                };
-                match call_responses_api(
-                    ctx.http_client,
-                    ctx.openai_api_key,
-                    inputs_for_step2,
-                    step2_api_args,
-                )
-                .await
-                {
-                    Ok(api_response_2) => {
-                        let response_id_for_db = api_response_2.id.clone();
-                        if let Some(OutputItem::Message(final_msg)) = api_response_2.output.first() {
-                            if final_msg.role == "assistant" {
-                                if let Some(content) = final_msg.content.first() {
-                                    if content.r#type == "output_text" {
-                                        return Ok((content.text.clone(), response_id_for_db));
-                                    }
-                                }
-                            }
-                        }
-                        warn!(chat_id = telegram_chat_id, "tool call step 2 response did not contain expected assistant message text structure.");
-                        Ok((
-                            "i processed the database query but couldn't form a final summary in the expected format.".to_string(), 
-                            response_id_for_db 
-                        ))
-                    }
-                    Err(e) => {
-                        error!(chat_id = telegram_chat_id, error = %e, "tool call step 2 api call failed");
-                        Err(e).context("tool call step 2 api call failed")
-                    }
-                }
-            } else {
-                warn!(chat_id = telegram_chat_id, "'sql_query' missing in {} args", function_call.name);
-                Err(eyre!(
-                    "argument 'sql_query' missing for tool {}",
-                    function_call.name
-                ))
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to parse args for {}", function_call.name);
-            Err(e).context(format!(
-                "failed to parse args for tool {}",
-                function_call.name
-            ))
-        }
-    }
-}
-
 // Helper function to process the initial API response and decide next steps
 async fn process_openai_response(
     ctx: &HandlerContext<'_>,
@@ -559,11 +436,11 @@ async fn process_openai_response(
                 Ok(("i received a response from the ai, but couldn't understand it fully.".to_string(), response_1_id))
             }
             OutputItem::FunctionCall(fc) => {
-                if fc.name == sql_select::SQL_TOOL_NAME {
+                if fc.name == tools::execute_sql_query::SQL_TOOL_NAME {
                     // Delegate to the SQL tool handler
-                    return handle_execute_sql_query_tool_call(
+                    return tools::execute_sql_query::handle_execute_sql_query_tool_call(
                         ctx,
-                        telegram_chat_id, // Pass down for logging
+                        telegram_chat_id, 
                         fc, 
                         original_input_items,
                         &response_1_id, 
@@ -589,4 +466,4 @@ async fn process_openai_response(
             response_1_id,
         ))
     }
-}
+} 

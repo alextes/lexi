@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::handler;
+use crate::message_processor;
 use crate::telegram;
 use telegram::types::{ApiResponse, Update};
 
@@ -59,7 +59,7 @@ pub async fn run_bot_loop(
                         last_update_id = update.update_id;
                         debug!(raw_update_object = ?update, "main loop: received update object from api");
 
-                        handler::process_update(
+                        message_processor::process_update(
                             &pool,
                             &update,
                             &http_client,
