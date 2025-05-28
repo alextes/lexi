@@ -192,3 +192,45 @@ pub async fn get_message_history(
     // The query gets latest N, but openai expects history oldest to newest.
     Ok(messages.into_iter().rev().collect())
 }
+
+// retrieves the last_openai_response_id for a given chat.
+pub async fn get_last_openai_response_id(
+    pool: &PgPool,
+    local_chat_id: i32,
+) -> Result<Option<String>> {
+    let result = sqlx::query!(
+        "SELECT last_openai_response_id FROM chats WHERE id = $1",
+        local_chat_id
+    )
+    .fetch_one(pool)
+    .await
+    .wrap_err_with(|| {
+        format!(
+            "failed to fetch last_openai_response_id for chat_id {}",
+            local_chat_id
+        )
+    })?;
+    Ok(result.last_openai_response_id)
+}
+
+// updates the last_openai_response_id for a given chat.
+pub async fn update_last_openai_response_id(
+    pool: &PgPool,
+    local_chat_id: i32,
+    response_id: &str,
+) -> Result<()> {
+    sqlx::query!(
+        "UPDATE chats SET last_openai_response_id = $1, updated_at = now() WHERE id = $2",
+        response_id,
+        local_chat_id
+    )
+    .execute(pool)
+    .await
+    .wrap_err_with(|| {
+        format!(
+            "failed to update last_openai_response_id for chat_id {} to {}",
+            local_chat_id, response_id
+        )
+    })?;
+    Ok(())
+}

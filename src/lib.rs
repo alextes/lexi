@@ -3,6 +3,7 @@ pub mod db;
 pub mod env;
 pub mod handler;
 pub mod log;
+pub mod openai_direct_api;
 pub mod telegram;
 pub mod tools;
 

@@ -1,4 +1,3 @@
-use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use sqlx::PgPool;
@@ -7,6 +6,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::handler;
 use crate::telegram;
+use telegram::types::{ApiResponse, Update};
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
@@ -14,7 +14,7 @@ pub async fn run_bot_loop(
     pool: PgPool,
     bot_token: String,
     http_client: ReqwestClient,
-    openai_client: OpenAIClient<OpenAIConfig>,
+    openai_api_key: String,
     bot_db_id: i32,
 ) -> Result<()> {
     let mut last_update_id = 0;
@@ -44,7 +44,7 @@ pub async fn run_bot_loop(
         let status = response.status();
         if status.is_success() {
             let api_response = response
-                .json::<telegram::types::ApiResponse<Vec<telegram::types::Update>>>()
+                .json::<ApiResponse<Vec<Update>>>()
                 .await
                 .wrap_err_with(|| "failed to parse json response from getUpdates")?;
 
@@ -62,11 +62,11 @@ pub async fn run_bot_loop(
                         handler::process_update(
                             &pool,
                             &update,
-                            &openai_client,
                             &http_client,
                             TELEGRAM_API_URL,
                             &bot_token,
-                            bot_db_id, // Pass bot_db_id
+                            bot_db_id,
+                            &openai_api_key,
                         )
                         .await
                         .wrap_err_with(|| {

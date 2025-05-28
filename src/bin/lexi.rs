@@ -1,44 +1,37 @@
-use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::time::Duration;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 use lexi::bot_loop::{run_bot_loop, TELEGRAM_API_URL};
 use lexi::db;
+use lexi::env::ENV_CONFIG;
+use lexi::log;
 use lexi::telegram;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+    dotenv::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    log::init(ENV_CONFIG.log_json, ENV_CONFIG.log_perf);
 
     info!("lexi telegram bot - custom implementation (rust)");
 
-    let database_url =
-        env::var("DATABASE_URL").context("DATABASE_URL not set in environment variables")?;
-
-    let pool = db::initialize_database(&database_url).await?;
+    let pool = db::initialize_database(&ENV_CONFIG.database_url).await?;
 
     let bot_token = env::var("TELEGRAM_BOT_TOKEN")
         .context("TELEGRAM_BOT_TOKEN not set in environment variables")?;
 
-    // Initialize Reqwest Client
     let reqwest_client = ReqwestClient::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .context("failed to build http client")?;
 
-    // Check for OPENAI_API_KEY before creating client
-    env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set in environment variables")?;
-    let openai_client = OpenAIClient::<OpenAIConfig>::new(); // Specify generic, no wrap_err_with here
+    let openai_api_key = env::var("OPENAI_API_KEY")
+        .context("OPENAI_API_KEY not set, it is required for the /v1/responses API.")?;
 
-    // Get bot's own details and store it
     info!("fetching bot's own user details...");
     let bot_user_from_api = telegram::get_me(&reqwest_client, TELEGRAM_API_URL, &bot_token)
         .await
@@ -58,7 +51,5 @@ async fn main() -> Result<()> {
         bot_db_id, "bot user data upserted into database"
     );
 
-    // Run the main bot loop
-    // If run_bot_loop returns an Err, it will propagate out of main, terminating the program.
-    run_bot_loop(pool, bot_token, reqwest_client, openai_client, bot_db_id).await
+    run_bot_loop(pool, bot_token, reqwest_client, openai_api_key, bot_db_id).await
 }

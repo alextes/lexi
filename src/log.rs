@@ -1,17 +1,15 @@
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
-use crate::env::get_env_bool;
-
-pub fn init() {
+pub fn init(log_json: bool, log_perf: bool) {
     let builder = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env());
 
-    let builder = if get_env_bool("LOG_PERF").unwrap_or(false) {
+    let builder = if log_perf {
         builder.with_span_events(FmtSpan::CLOSE)
     } else {
         builder
     };
 
-    if get_env_bool("LOG_JSON").unwrap_or(false) {
+    if log_json {
         builder.json().init();
     } else {
         builder.init();
