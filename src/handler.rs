@@ -1,5 +1,5 @@
 // use crate::openai_direct_api; // Removed as it's unused due to specific imports below
-use crate::openai_direct_api::{
+use crate::openai_api::{
     call_responses_api, InputItem, InputMessageObject, OutputItem, ToolDefinition,
     ToolFunctionParameterProperty, ToolFunctionParameters,
 };
@@ -285,7 +285,7 @@ async fn generate_and_send_ai_reply(
         sql_select::SQL_TOOL_NAME
     );
 
-    let initial_api_args = crate::openai_direct_api::CallResponsesApiOptionalArgs {
+    let initial_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
         model_id: OPENAI_RESPONSES_MODEL_ID,
         previous_response_id: previous_response_id_opt.as_deref(),
         tools: Some(available_tools.clone()),
@@ -437,7 +437,7 @@ async fn send_reply_and_update_state(
 async fn handle_execute_sql_query_tool_call(
     ctx: &HandlerContext<'_>,
     telegram_chat_id: i64, // Added for logging
-    function_call: &crate::openai_direct_api::OutputFunctionCall,
+    function_call: &crate::openai_api::OutputFunctionCall,
     original_input_items: Vec<InputItem>,
     initial_api_response_id: &str,
     available_tools: Vec<ToolDefinition>,
@@ -465,7 +465,7 @@ async fn handle_execute_sql_query_tool_call(
                     ),
                 }));
                 inputs_for_step2.push(InputItem::FunctionCallOutput(
-                    crate::openai_direct_api::FunctionCallOutputItem {
+                    crate::openai_api::FunctionCallOutputItem {
                         r#type: "function_call_output".to_string(),
                         call_id: function_call.call_id.clone(),
                         output: sql_result_json.to_string(),
@@ -473,7 +473,7 @@ async fn handle_execute_sql_query_tool_call(
                 ));
 
                 info!("(handler) sending function call result back to /v1/responses api");
-                let step2_api_args = crate::openai_direct_api::CallResponsesApiOptionalArgs {
+                let step2_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
                     model_id: OPENAI_RESPONSES_MODEL_ID,
                     previous_response_id: Some(initial_api_response_id),
                     tools: Some(available_tools),
@@ -534,7 +534,7 @@ async fn handle_execute_sql_query_tool_call(
 async fn process_openai_response(
     ctx: &HandlerContext<'_>,
     telegram_chat_id: i64, 
-    api_response_1: crate::openai_direct_api::OpenAiApiResponse, 
+    api_response_1: crate::openai_api::OpenAiApiResponse, 
     original_input_items: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>,
     instructions: &str,
