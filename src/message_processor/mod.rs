@@ -262,7 +262,7 @@ pub async fn generate_and_send_ai_reply(
                 error!(chat_id = incoming_message.chat.id, error = %send_err, "failed to send even the error fallback message after content gen failure.");
             });
             // Propagate the error that caused the fallback
-            return Err(e.into());
+            return Err(e);
         }
     }
     Ok(())
