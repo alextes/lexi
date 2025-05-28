@@ -242,21 +242,22 @@ async fn generate_and_send_ai_reply(
         content: prompt_text.to_string(),
     })];
 
-    let available_tools = vec![tools::execute_sql_query::SQL_QUERY_TOOL.clone()];
+    let available_tools = vec![
+        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
+        tools::mevdb_query::MEVDB_QUERY_TOOL.clone(),
+        tools::mevdb_schema::MEVDB_SCHEMA_TOOL.clone(),
+    ];
     let instructions = format!(
         "you are a helpful ai assistant named lexi. use tools if appropriate. \
-        you have one tool available: '{}'. \
-        its purpose is to execute a sql select query you provide against the database. \
-        you must formulate the sql query yourself. only select queries are permitted. \
-        the available tables are (focus on querying 'users', 'chats', 'messages'): \
-        1. 'users' (stores telegram user information): \
-           columns: id (serial primary key), telegram_id (bigint unique not null), username (text), first_name (text not null), last_name (text), is_bot (boolean not null default false), created_at (timestamptz not null default now()), updated_at (timestamptz not null default now()). \
-        2. 'chats' (stores chat information): \
-           columns: id (serial primary key), telegram_id (bigint unique not null), type (text not null - e.g., 'private', 'group'), title (text), username (text), created_at (timestamptz not null default now()), updated_at (timestamptz not null default now()). \
-        3. 'messages' (stores messages from chats): \
-           columns: id (serial primary key), telegram_message_id (bigint not null), chat_id (integer not null, references chats.id), sender_id (integer not null, references users.id), text (text), sent_at (timestamptz not null), raw_message (text), created_at (timestamptz not null default now()). \
-        ensure your queries target these tables and their specified columns correctly. if you use the tool, you will provide the exact sql query to execute.",
-        tools::execute_sql_query::SQL_TOOL_NAME
+        you have the following tools available: \
+        1. '{}': checks if an ethereum beacon chain slot was missed. params: 'slot_number' (integer). \
+        2. '{}': executes a sql select query against a read-only mev database. params: 'sql_query' (string). \
+        3. '{}': retrieves the schema for the mev database. use this if you need to understand table structures before using the '{}' tool. this tool takes no parameters. \
+        ensure your queries/parameters target these tools and their specified inputs correctly.",
+        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME, 
+        tools::mevdb_query::MEVDB_TOOL_NAME,
+        tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME,
+        tools::mevdb_query::MEVDB_TOOL_NAME
     );
 
     let initial_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
@@ -281,7 +282,7 @@ async fn generate_and_send_ai_reply(
                 incoming_message.chat.id,
                 api_response_1, 
                 input_items, 
-                available_tools, // This will be passed to the tool handler
+                available_tools,
                 &instructions
             ).await {
                 Ok((final_text, response_id_to_store)) => {
@@ -416,9 +417,7 @@ async fn process_openai_response(
     available_tools: Vec<ToolDefinition>,
     instructions: &str,
 ) -> Result<(String, String)> {
-    // Returns (final_text_to_send_to_user, response_id_to_store_for_chat_state)
-
-    let response_1_id = api_response_1.id.clone(); // ID of the first response
+    let response_1_id = api_response_1.id.clone();
 
     if let Some(output_item) = api_response_1.output.first() {
         match output_item {
@@ -426,24 +425,41 @@ async fn process_openai_response(
                 if msg.role == "assistant" {
                     if let Some(text_content) = msg.content.first() {
                         if text_content.r#type == "output_text" {
-                            // Direct reply from AI, no tool used
                             return Ok((text_content.text.clone(), response_1_id));
                         }
                     }
                 }
-                // If assistant message is not found or not in expected format
                 warn!(chat_id = telegram_chat_id, "no direct assistant text in first response: {:?}", msg);
                 Ok(("i received a response from the ai, but couldn't understand it fully.".to_string(), response_1_id))
             }
             OutputItem::FunctionCall(fc) => {
-                if fc.name == tools::execute_sql_query::SQL_TOOL_NAME {
-                    // Delegate to the SQL tool handler
-                    return tools::execute_sql_query::handle_execute_sql_query_tool_call(
+                if fc.name == tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
+                    return tools::beacon_slot_check::handle_beacon_slot_check_tool_call(
                         ctx,
-                        telegram_chat_id, 
-                        fc, 
+                        telegram_chat_id,
+                        fc,
                         original_input_items,
-                        &response_1_id, 
+                        &response_1_id,
+                        available_tools,
+                        instructions,
+                    ).await;
+                } else if fc.name == tools::mevdb_query::MEVDB_TOOL_NAME {
+                    return tools::mevdb_query::handle_mevdb_query_tool_call(
+                        ctx,
+                        telegram_chat_id,
+                        fc,
+                        original_input_items,
+                        &response_1_id,
+                        available_tools,
+                        instructions,
+                    ).await;
+                } else if fc.name == tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME {
+                    return tools::mevdb_schema::handle_mevdb_schema_tool_call(
+                        ctx,
+                        telegram_chat_id,
+                        fc,
+                        original_input_items,
+                        &response_1_id,
                         available_tools,
                         instructions,
                     ).await;

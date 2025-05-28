@@ -1,15 +1,17 @@
-use crate::openai_api::{
-    call_responses_api, InputItem, InputMessageObject, OutputFunctionCall, OutputItem, ToolDefinition,
-    ToolFunctionParameterProperty, ToolFunctionParameters,
-};
+use super::common::handle_tool_call_step2_openai_response;
+use super::common::ToolStep2Context;
 use crate::message_processor::HandlerContext;
+use crate::openai_api::{
+    InputItem, OutputFunctionCall, ToolDefinition, ToolFunctionParameterProperty,
+    ToolFunctionParameters,
+};
+use chrono;
 use eyre::{eyre, Context, Result};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::{Column, PgPool, Row, ValueRef};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tracing::{error, info, warn};
-use chrono;
 
 pub const SQL_TOOL_NAME: &str = "execute_sql_query";
 
@@ -119,7 +121,7 @@ pub async fn execute_db_query(pool: &PgPool, query: &str) -> JsonValue {
 // --- tool call handling (response processing) ---
 pub async fn handle_execute_sql_query_tool_call(
     ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64, 
+    telegram_chat_id: i64,
     function_call: &OutputFunctionCall,
     original_input_items: Vec<InputItem>,
     initial_api_response_id: &str,
@@ -133,69 +135,28 @@ pub async fn handle_execute_sql_query_tool_call(
             if let Some(sql_query_from_ai) = args_map.get("sql_query") {
                 info!(query = %sql_query_from_ai, "executing sql query from ai");
 
-                let sql_result_json = execute_db_query(ctx.pool, sql_query_from_ai).await; // Call local function
+                let sql_result_json_value = execute_db_query(ctx.pool, sql_query_from_ai).await;
+                let sql_result_json_string = sql_result_json_value.to_string();
 
-                let mut inputs_for_step2 = original_input_items;
-                inputs_for_step2.push(InputItem::Message(InputMessageObject {
-                    role: "assistant".to_string(),
-                    content: format!(
-                        "tool_call: name={}, id={}, call_id={}, args={}",
-                        function_call.name,
-                        function_call.id,
-                        function_call.call_id,
-                        function_call.arguments
-                    ),
-                }));
-                inputs_for_step2.push(InputItem::FunctionCallOutput(
-                    crate::openai_api::FunctionCallOutputItem {
-                        r#type: "function_call_output".to_string(),
-                        call_id: function_call.call_id.clone(),
-                        output: sql_result_json.to_string(),
-                    },
-                ));
-
-                info!("(handler) sending function call result back to /v1/responses api");
-                let step2_api_args = crate::openai_api::CallResponsesApiOptionalArgs {
-                    model_id: crate::message_processor::OPENAI_RESPONSES_MODEL_ID, // Access const from message_processor
-                    previous_response_id: Some(initial_api_response_id),
-                    tools: Some(available_tools),
-                    tool_choice: None,
-                    instructions: Some(instructions),
-                    temperature: None,
-                    store: None,
+                let step2_ctx = ToolStep2Context {
+                    telegram_chat_id,
+                    function_name: &function_call.name,
+                    function_id: &function_call.id,
+                    function_call_id: &function_call.call_id,
+                    function_arguments: &function_call.arguments,
+                    original_input_items,
+                    initial_api_response_id,
+                    available_tools,
+                    instructions,
+                    tool_output_json_string: sql_result_json_string,
                 };
-                match call_responses_api(
-                    ctx.http_client,
-                    ctx.openai_api_key,
-                    inputs_for_step2,
-                    step2_api_args,
-                )
-                .await
-                {
-                    Ok(api_response_2) => {
-                        let response_id_for_db = api_response_2.id.clone();
-                        if let Some(OutputItem::Message(final_msg)) = api_response_2.output.first() {
-                            if final_msg.role == "assistant" {
-                                if let Some(content) = final_msg.content.first() {
-                                    if content.r#type == "output_text" {
-                                        return Ok((content.text.clone(), response_id_for_db));
-                                    }
-                                }
-                            }
-                        }
-                        warn!(chat_id = telegram_chat_id, "tool call step 2 response did not contain expected assistant message text structure.");
-                        Ok((
-                            "i processed the database query but couldn't form a final summary in the expected format.".to_string(), 
-                            response_id_for_db 
-                        ))
-                    }
-                    Err(e) => {
-                        error!(chat_id = telegram_chat_id, error = %e, "tool call step 2 api call failed");
-                        Err(e).context("tool call step 2 api call failed")
-                    }
-                }
+
+                handle_tool_call_step2_openai_response(ctx, step2_ctx).await
             } else {
-                warn!(chat_id = telegram_chat_id, "'sql_query' missing in {} args", function_call.name);
+                warn!(
+                    chat_id = telegram_chat_id,
+                    "'sql_query' missing in {} args", function_call.name
+                );
                 Err(eyre!(
                     "argument 'sql_query' missing for tool {}",
                     function_call.name
@@ -211,7 +172,6 @@ pub async fn handle_execute_sql_query_tool_call(
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -315,4 +275,4 @@ mod tests {
             .contains("column \"non_existent_column\" does not exist"));
         Ok(())
     }
-} 
+}

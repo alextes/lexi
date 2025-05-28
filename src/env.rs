@@ -51,18 +51,24 @@ pub fn get_env_bool(key: &str) -> Option<bool> {
 
 pub struct EnvConfig {
     /// url of the database to run against
-    pub database_url: String,
+    pub database_url: Option<String>,
     /// output logs in json format
     pub log_json: bool,
     /// add how long each span took to the logs
     pub log_perf: bool,
+    /// url of the beacon node
+    pub beacon_url: Option<String>,
+    /// url of the mevdb database (optional)
+    pub mevdb_database_url: Option<String>,
 }
 
 pub fn get_env_config() -> EnvConfig {
     EnvConfig {
-        database_url: get_env_var("DATABASE_URL").expect("DATABASE_URL is required"),
+        database_url: get_env_var("DATABASE_URL"),
         log_json: get_env_bool("LOG_JSON").unwrap_or(false),
         log_perf: get_env_bool("LOG_PERF").unwrap_or(false),
+        beacon_url: get_env_var("BEACON_URL"),
+        mevdb_database_url: get_env_var("MEVDB_DATABASE_URL"),
     }
 }
 

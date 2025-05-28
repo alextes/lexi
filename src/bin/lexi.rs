@@ -19,7 +19,11 @@ async fn main() -> Result<()> {
 
     info!("lexi telegram bot - custom implementation (rust)");
 
-    let pool = db::initialize_database(&ENV_CONFIG.database_url).await?;
+    let db_url = ENV_CONFIG
+        .database_url
+        .as_ref()
+        .expect("DATABASE_URL is required for the main application");
+    let pool = db::initialize_database(db_url).await?;
 
     let bot_token = env::var("TELEGRAM_BOT_TOKEN")
         .context("TELEGRAM_BOT_TOKEN not set in environment variables")?;

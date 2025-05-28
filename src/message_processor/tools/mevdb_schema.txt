@@ -1,0 +1,713 @@
+MEV Database Schema Documentation
+
+=== ENUMS ===
+
+1. public.blacklist_id_enum
+   - Values: 'ofac', 'uk'
+
+2. public.geo
+   - Values: 'rbx', 'us-east', 'vin'
+
+3. public.request_endpoint
+   - Values: 'get_header'
+
+4. public.request_outcome
+   - Values: 'cancelled', 'success'
+
+=== TABLES ===
+
+1. public._sqlx_migrations
+   - Tracks database migrations
+   Columns:
+   - version (bigint, PRIMARY KEY, NOT NULL)
+   - description (text, NOT NULL)
+   - installed_on (timestamp with time zone, NOT NULL, default now())
+   - success (boolean, NOT NULL)
+   - checksum (bytea, NOT NULL)
+   - execution_time (bigint, NOT NULL)
+
+2. public.alex_builder
+   - Stores builder information
+   Columns:
+   - id (bigint)
+   - builder_id (text)
+   - builder_pubkey (text)
+   - collateral (text)
+   - description (text)
+   - geo (text)
+   - inserted_at (text)
+   - is_blacklisted (text)
+   - is_high_prio (text)
+   - is_optimistic (text)
+   Indexes:
+   - alex_builder_builder_pubkey_uindex on (builder_pubkey)
+
+3. public.alex_payload_delivered
+   - Tracks delivered payloads
+   Columns:
+   - id (bigint, NOT NULL)
+   - signed_at (timestamp without time zone)
+   - publish_ms (bigint)
+   - slot (bigint)
+
+4. public.algorithm_excluded_operators
+   - Tracks operators excluded from algorithms
+   Columns:
+   - operator (text, NOT NULL)
+   - excluded_from_lookback_algorithm (boolean)
+   - excluded_from_deadline_algorithm (boolean)
+
+5. public.auction_analysis
+   - Analyzes auction results
+   Columns:
+   - slot (integer, PRIMARY KEY, NOT NULL)
+   - delta (double precision)
+   - relays (text[])
+   - is_auction_slot (boolean)
+   - why_no_win (text)
+   - why_no_capture (text)
+   - slot_start_at (timestamp with time zone, NOT NULL)
+   - winning_bid_value (numeric)
+   - winning_block_hash (text)
+   - builder_pubkey (text)
+   - proposer_pubkey (text)
+   - builder_id (text)
+   - inserted_at (timestamp with time zone, default now())
+   - expected_header_call (boolean)
+   - expected_header_call_geo (geo)
+   - winning_block_eligible_at_rbx (timestamp with time zone)
+   - winning_block_eligible_at_vin (timestamp with time zone)
+   - parent_hash (text)
+   Indexes:
+   - auction_analysis_proposer_pubkey_index on (proposer_pubkey)
+
+6. public.bid_trace_builder_pubkeys
+   - Maps builder pubkeys for bid traces
+   Columns:
+   - id (smallint, PRIMARY KEY, NOT NULL)
+   - builder_pubkey (text, NOT NULL, UNIQUE)
+   Indexes:
+   - bid_trace_builder_pubkeys_pkey on (id)
+   - bid_trace_builder_pubkeys_builder_pubkey_key on (builder_pubkey)
+
+7. public.bid_traces
+   - Stores bid trace information
+   Columns:
+   - relay (text, NOT NULL, PRIMARY KEY)
+   - builder_pubkey_id (smallint, NOT NULL)
+   - slot (integer, NOT NULL, PRIMARY KEY)
+   - received_at (timestamp with time zone, NOT NULL, PRIMARY KEY)
+   Indexes:
+   - bid_traces_pkey on (slot, relay, builder_pubkey_id, received_at)
+
+8. public.billable_adjustments
+   - Tracks billable adjustments
+   Columns:
+   - slot (integer, NOT NULL)
+   - inserted_at (timestamp with time zone, NOT NULL)
+   - builder_pubkey (text, NOT NULL)
+   - value (numeric, NOT NULL)
+   - block_hash (text, NOT NULL)
+   - adjusted_block_hash (text, NOT NULL)
+   - adjusted_value (numeric, NOT NULL)
+   - delta (numeric, NOT NULL)
+   - landed (boolean)
+   - id (bigint, NOT NULL)
+   - adjusted_id (bigint, PRIMARY KEY, NOT NULL)
+   - builder (text)
+   Indexes:
+   - alex_adjustments_landed_index on (landed)
+   - alex_adjustments_adjusted_block_hash_uindex on (adjusted_block_hash)
+
+9. public.blacklist_entries
+   - Stores blacklisted addresses
+   Columns:
+   - address (varchar(42), PRIMARY KEY, NOT NULL)
+   - display_name (text, NOT NULL)
+   - blacklist_id (blacklist_id_enum, NOT NULL)
+   - date_added (date, NOT NULL)
+   - date_added_unix (bigint, NOT NULL)
+   Constraints:
+   - UNIQUE (address, blacklist_id)
+   Indexes:
+   - blacklist_entries_date_added_unix_idx on (date_added_unix)
+
+10. public.block_production
+    - Tracks block production
+    Columns:
+    - id (bigserial, PRIMARY KEY)
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - slot_number (bigint, NOT NULL)
+    - block_number (bigint, NOT NULL)
+    - block_hash (varchar(66), NOT NULL)
+    - builder_pubkey (varchar(98))
+    - proposer_pubkey (varchar(98))
+    - relays (text[])
+    - value (numeric)
+    Constraints:
+    - UNIQUE (slot_number, block_number, block_hash)
+
+11. public.blocks
+    - Stores block information
+    Columns:
+    - id (bigserial, PRIMARY KEY)
+    - base_fee_per_gas (bigint, NOT NULL)
+    - block_hash (varchar(66), UNIQUE, NOT NULL)
+    - block_number (bigint, UNIQUE, NOT NULL)
+    - extra_data (text)
+    - fee_recipient (varchar(42), NOT NULL)
+    - gas_limit (bigint, NOT NULL)
+    - gas_used (bigint, NOT NULL)
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - logs_bloom (varchar(514), NOT NULL)
+    - parent_hash (varchar(66), NOT NULL)
+    - receipts_root (varchar(66), NOT NULL)
+    - sha3_uncles (varchar(66), NOT NULL)
+    - size (integer, NOT NULL)
+    - state_root (varchar(66), NOT NULL)
+    - timestamp (timestamp with time zone, UNIQUE, NOT NULL)
+    - timestamp_unix (bigint, UNIQUE, NOT NULL)
+    - transaction_count (integer, NOT NULL)
+    - transactions_root (varchar(66), NOT NULL)
+
+12. public.builder_pubkey_id
+    - Maps builder pubkeys to IDs
+    Columns:
+    - builder_pubkey (varchar, PRIMARY KEY, UNIQUE, NOT NULL)
+    - builder_id (varchar, NOT NULL)
+    Constraints:
+    - PRIMARY KEY (builder_pubkey, builder_id)
+
+13. public.builder_pubkeys
+    - Stores builder public keys
+    Columns:
+    - id (bigserial, PRIMARY KEY)
+    - pubkey (varchar(98), NOT NULL)
+    - builder_id (text, NOT NULL)
+    - builder_name (text)
+
+14. public.christian_eligibility_backfill_rbx
+    - Backfill data for RBX eligibility
+    Columns:
+    - winning_block_hash (text)
+    - eligible_at_rbx (timestamp with time zone)
+
+15. public.christian_eligibility_backfill_vin
+    - Backfill data for VIN eligibility
+    Columns:
+    - winning_block_hash (text)
+    - eligible_at_vin (timestamp with time zone)
+
+16. public.client_isp_delay_parameters
+    - ISP-specific delay parameters
+    Columns:
+    - client (text)
+    - isp (text)
+    - slot_to_sent (integer)
+    - deadline (integer)
+
+17. public.delay_parameters
+    - Client delay parameters
+    Columns:
+    - client (text, PRIMARY KEY, NOT NULL)
+    - slot_to_sent (integer)
+    - deadline (integer)
+
+18. public.delay_parameters_history
+    - History of delay parameters
+    Columns:
+    - id (integer, PRIMARY KEY, NOT NULL)
+    - client (text, NOT NULL)
+    - deadline (integer)
+    - deadline_slot_start (integer)
+    - outgoing_latency_multiplier (double precision)
+    - lookback_duration (integer)
+    - inserted_at (timestamp without time zone, NOT NULL, default now())
+    - max_requests (integer)
+
+19. public.deprecated_header_requests
+    - Deprecated header request data
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - block_hash (text)
+    - ip_address (text)
+    - proposer_pubkey (text)
+    - received_at (timestamp with time zone)
+    - replying_at (timestamp with time zone)
+    - slot (integer)
+    - user_agent (text)
+    - bid_value (numeric)
+    - builder_pubkey (text)
+    - is_current_validator (boolean)
+
+20. public.global_lookback_strategy
+    - Global lookback strategy settings
+    Columns:
+    - inserted_at (timestamp with time zone, PRIMARY KEY, NOT NULL, default now())
+    - strategy_id (integer, NOT NULL, references public.lookback_strategies)
+
+21. public.header_delay_updates
+    - Header delay update tracking
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - ip_address (text, NOT NULL)
+    - latest_header_slot (bigint, NOT NULL)
+    - prev_delay_ms (integer, NOT NULL)
+    - timeout_ema (double precision)
+    - delay_delta_ms (integer, NOT NULL)
+    - inserted_at (timestamp with time zone, default now())
+    - num_non_timeouts (integer)
+    - num_timeouts (integer)
+    Constraints:
+    - UNIQUE (ip_address, latest_header_slot)
+
+22. public.ip_clusters
+    - IP address clustering
+    Columns:
+    - cluster_id (integer)
+    - ip_address (text)
+
+23. public.ip_lookback_strategy
+    - IP-specific lookback strategies
+    Columns:
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - ip_address (text, NOT NULL)
+    - strategy_id (integer, references public.lookback_strategies)
+    Constraints:
+    - PRIMARY KEY (ip_address, inserted_at)
+
+24. public.ip_meta
+    - IP metadata and metrics
+    Columns:
+    - ip_address (text, PRIMARY KEY, NOT NULL)
+    - autonomous_system (text)
+    - city (text)
+    - country (text)
+    - country_code (text)
+    - isp (text)
+    - lat (double precision)
+    - lon (double precision)
+    - org (text)
+    - proxy (boolean)
+    - hosting (boolean)
+    - updated_at (timestamp with time zone, NOT NULL, default now())
+    - latency_updated_at (timestamp with time zone)
+    - latency_loss_rate (double precision)
+    - latency_p50_ms (double precision)
+    - latency_p75_ms (double precision)
+    - latency_p90_ms (double precision)
+    - latency_p95_ms (double precision)
+    - latency_p99_ms (double precision)
+    - latency_method (text)
+    - manual_delay_ms (integer)
+    - optimized_delay_ms (integer)
+    - optimized_lookback_ms (integer)
+    - connected_relays (text[])
+    - optimized_request_delay_ms (integer)
+
+25. public.lido_operator_pubkeys
+    - Lido operator public keys
+    Columns:
+    - pubkey (text, UNIQUE)
+    - operator_name (text)
+
+26. public.lido_operator_pubkeys_backup
+    - Backup of Lido operator keys
+    Columns:
+    - pubkey (text, UNIQUE)
+    - operator_id (text)
+
+27. public.lookback_strategies
+    - Lookback strategy definitions
+    Columns:
+    - strategy_id (serial, PRIMARY KEY)
+    - name (text, NOT NULL)
+
+28. public.lookback_strategy_parameters
+    - Parameters for lookback strategies
+    Columns:
+    - strategy_id (integer, NOT NULL, references public.lookback_strategies)
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - min_lookback_duration_ms (integer, NOT NULL, CHECK (>= 0))
+    - default_lookback_duration_ms (integer, NOT NULL, CHECK (>= 0))
+    - min_date_update_lookback_duration (timestamp with time zone)
+    - lookback_increase_ms (integer, NOT NULL)
+    - lookback_decrease_ms (integer, NOT NULL)
+    - acceptable_adjustment_failure_rate (real, NOT NULL)
+    - num_observations_failure_rate (integer, NOT NULL, CHECK (>= 0))
+    - seconds_failure_rate (integer, NOT NULL, CHECK (>= 0))
+    Constraints:
+    - PRIMARY KEY (strategy_id, inserted_at)
+
+29. public.lookback_updates
+    - Lookback update tracking
+    Columns:
+    - slot (integer, NOT NULL)
+    - ip_address (text, NOT NULL)
+    - prev_lookback_ms (integer, NOT NULL)
+    - failure_rate (double precision, NOT NULL)
+    - lookback_delta_ms (integer, NOT NULL)
+    - inserted_at (timestamp with time zone, default now())
+    Constraints:
+    - PRIMARY KEY (slot, ip_address)
+
+30. public.missed_slots
+    - Tracks missed slots
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - slot_number (bigint, NOT NULL)
+    - relayed_block_hash (varchar(66), NOT NULL)
+    - canonical_block_hash (varchar(66))
+
+31. public.missed_slots_all_relays
+    - Tracks slots missed by all relays
+    Columns:
+    - slot (integer, PRIMARY KEY, NOT NULL)
+    - relays (text[], NOT NULL)
+    - proposer_pubkey (text, NOT NULL)
+
+32. public.monitor_checkpoints
+    - Monitor checkpoint tracking
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - monitor_id (text, UNIQUE, NOT NULL)
+    - timestamp (timestamp with time zone, NOT NULL)
+
+33. public.obol_clusters
+    - Obol cluster information
+    Columns:
+    - cluster_id (text, PRIMARY KEY, NOT NULL)
+    - operator_count (integer, NOT NULL)
+    - cluster_name (text, NOT NULL)
+
+34. public.obol_proposers
+    - Obol proposer information
+    Columns:
+    - cluster_id (text, NOT NULL)
+    - pubkey (text, PRIMARY KEY, NOT NULL)
+
+35. public.operator_delay_parameters
+    - Operator-specific delay parameters
+    Columns:
+    - operator (text, PRIMARY KEY, NOT NULL)
+    - deadline (integer)
+    - deadline_slot_start (integer)
+    - outgoing_latency_multiplier (double precision)
+    - lookback_duration (integer)
+    - max_requests (integer)
+
+36. public.operator_delay_parameters_history
+    - History of operator delay parameters
+    Columns:
+    - id (integer, PRIMARY KEY, NOT NULL)
+    - operator (text, NOT NULL)
+    - deadline (integer)
+    - deadline_slot_start (integer)
+    - max_requests (integer)
+    - lookback_duration (integer)
+    - outgoing_latency_multiplier (double precision)
+    - inserted_at (timestamp without time zone, NOT NULL, default now())
+
+37. public.operator_provided_labels
+    - Labels provided by operators
+    Columns:
+    - label (text, NOT NULL)
+    - pubkey (text, PRIMARY KEY, NOT NULL)
+
+38. public.operator_user_agent_parameters
+    - Operator user agent parameters
+    Columns:
+    - operator (text)
+    - user_agent (text)
+    - deadline (integer)
+    - deadline_slot_start (integer)
+    - max_requests (integer)
+    - lookback_duration (integer)
+    - outgoing_latency_multiplier (double precision)
+    Constraints:
+    - UNIQUE (operator, user_agent)
+
+39. public.operator_user_agent_parameters_history
+    - History of operator user agent parameters
+    Columns:
+    - id (integer, PRIMARY KEY, NOT NULL)
+    - operator (text, NOT NULL)
+    - user_agent (text, NOT NULL)
+    - deadline (integer)
+    - deadline_slot_start (integer)
+    - max_requests (integer)
+    - lookback_duration (integer)
+    - outgoing_latency_multiplier (double precision)
+    - inserted_at (timestamp without time zone, NOT NULL, default now())
+
+40. public.p2p_clusters
+    - P2P cluster information
+    Columns:
+    - cluster (text)
+    - validator_key (text)
+
+41. public.payload_requests
+    - Payload request tracking
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - pubkey (text, NOT NULL)
+    - signed_blinded_block (jsonb)
+    - abort_reason (text)
+    - content_length (integer)
+    - finished_at (timestamp with time zone)
+    - received_at (timestamp with time zone)
+    - head_slot (integer)
+    - user_agent (text)
+    - req_id_param (text)
+    - ip (text)
+    - block_hash (text, GENERATED, STORED)
+    - decoded_at (timestamp with time zone)
+    - time_after_publish (timestamp with time zone)
+    - time_before_publish (timestamp with time zone)
+    - slot (integer, GENERATED, STORED)
+    - geo (geo, NOT NULL)
+    Indexes:
+    - payload_requests_ip_index on (ip)
+    - payload_requests_pubkey_ip_index on (pubkey, ip)
+
+42. public.proposer_labels
+    - Proposer labeling
+    Columns:
+    - pubkey (text)
+    - entity (text)
+    - entity_unique_name (text)
+    Constraints:
+    - UNIQUE (entity, entity_unique_name, pubkey)
+
+43. public.pubkey_clusters
+    - Public key clustering
+    Columns:
+    - pubkey (text)
+    - cluster_id (integer)
+
+44. public.request_outcomes
+    - Request outcome tracking
+    Columns:
+    - request_id (uuid, PRIMARY KEY, NOT NULL)
+    - detected_at (timestamp with time zone)
+    - endpoint (request_endpoint, NOT NULL)
+    - outcome (request_outcome, NOT NULL)
+
+45. public.ssv_pubkeys
+    - SSV public key information
+    Columns:
+    - operator_names (text)
+    - pubkey (text, NOT NULL)
+    - operators_mev_relays (text)
+
+46. public.top_bid_history
+    - History of top bids
+    Columns:
+    - id (bigserial, PRIMARY KEY)
+    - geo (geo, NOT NULL)
+    - slot (bigint, NOT NULL)
+    - parent_hash (varchar(66), NOT NULL)
+    - eligible_at (timestamp with time zone, NOT NULL)
+    - builder_pubkey (varchar(98), NOT NULL)
+    - fresh (boolean, NOT NULL)
+    - cancellable (boolean, NOT NULL)
+    - adjustable (boolean, NOT NULL)
+    - block_hash (varchar(66), NOT NULL)
+    - value (numeric(78), NOT NULL)
+    - proposer_pubkey (varchar(98), NOT NULL)
+    Indexes:
+    - idx_top_bid_history_slot on (slot)
+
+47. public.turbo_header_requests
+    - Turbo header request tracking
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - slot (integer, NOT NULL)
+    - ip_address (text, NOT NULL)
+    - received_at (timestamp with time zone, NOT NULL)
+    - user_agent (text)
+    - base_sleep_duration (integer)
+    - proposer_pubkey (text, NOT NULL)
+    - block_hash (text)
+    - sleep_duration (integer)
+    - lookback_duration (integer)
+    - sleep_delta (numeric)
+    - replying_at (timestamp with time zone)
+    - bid_value (numeric)
+    - adjusted_bid_value (numeric)
+    - builder_pubkey (text)
+    - loss_hint (text)
+    - delivered_at (timestamp with time zone)
+    - lookback_delta (numeric)
+    - inserted_at (timestamp with time zone, default now())
+    - geo (geo, NOT NULL)
+    - cancelled_at (timestamp with time zone)
+    - worker_request_id (uuid)
+    - client_sent_at (timestamp with time zone)
+    Indexes:
+    - turbo_header_requests_slot_index on (slot)
+    - turbo_header_requests_received_at_index on (received_at)
+
+48. public.validator_pubkeys
+    - Validator public key information
+    Columns:
+    - id (serial, PRIMARY KEY)
+    - inserted_at (timestamp with time zone, NOT NULL, default now())
+    - pubkey (varchar(98), UNIQUE, NOT NULL)
+    - validator_index (integer, UNIQUE, NOT NULL)
+    - operator_id (text, NOT NULL)
+
+49. public.validator_registrations
+    - Validator registration information
+    Columns:
+    - pubkey (text, NOT NULL)
+    - fee_recipient (text)
+    - relay (text, NOT NULL)
+    - gas_limit (bigint)
+    - signature (text)
+    - timestamp (timestamp with time zone)
+    Constraints:
+    - PRIMARY KEY (relay, pubkey)
+    Indexes:
+    - validator_registrations_relay_idx on (relay)
+    - validator_registrations_pubkey_idx on (pubkey)
+
+50. public.validators
+    - Validator information
+    Columns:
+    - index (bigint, PRIMARY KEY, NOT NULL)
+    - pubkey (text, NOT NULL)
+    - status (text, NOT NULL)
+    - label (text)
+    - lido_operator (text)
+    - last_graffiti (text)
+    - last_registration_fee_recipient (text)
+    - last_registration_ip_address (text)
+    - last_registration_received_at (timestamp with time zone)
+    - last_registration_timestamp (timestamp with time zone)
+    - last_registration_user_agent (text)
+    - last_registration_geo (geo)
+    - last_registration_sent_at (timestamp with time zone)
+    Indexes:
+    - validators_pubkey_idx on (pubkey)
+    - validators_status_idx on (status)
+    - validators_last_registration_ip_address_idx on (last_registration_ip_address)
+
+=== MATERIALIZED VIEWS ===
+
+1. public.operators_all
+   - Aggregates operator information
+   Columns:
+   - operator_id (text)
+   - validator_count (bigint)
+   - relays (text[])
+   Indexes:
+   - operators_all_operator_id on (operator_id)
+
+2. public.ip_pubkey_view
+   - Maps IPs to public keys
+   Columns:
+   - pubkey (text)
+   - ip_address (text)
+   Indexes:
+   - idx_ip_pubkey_view_pubkey on (pubkey)
+   - idx_ip_pubkey_view_ip_address on (ip_address)
+   - idx_ip_pubkey_view on (ip_address, pubkey)
+
+3. public.proposer_labels_with_imputed_data_view
+   - Enhanced proposer labels with imputed data
+   Columns:
+   - pubkey (text)
+   - label (text)
+
+4. public.ip_pubkey_labels
+   - Combined IP and pubkey labels
+   Columns:
+   - pubkey (text)
+   - ip_address (text)
+   - graffiti (text)
+   - lido_operator (text)
+   - validator_label_old (text)
+   - label (text)
+   Indexes:
+   - ip_pubkey_labels_pubkey_index on (pubkey)
+   - ip_pubkey_labels_ip_address_index on (ip_address)
+   - ip_pubkey_labels_label_index on (label)
+
+=== VIEWS ===
+
+1. public.builder_pubkey_extra_data
+   - Aggregates extra data per builder
+   Columns:
+   - builder_pubkey (text)
+   - aggregated_extra_datas (text)
+
+2. public.builder_pubkey_recent_extra_data
+   - Shows recent extra data per builder
+   Columns:
+   - builder_pubkey (text)
+   - block_number (bigint)
+   - decoded_extra_data (text)
+
+3. public.timed_out_sleep_durations_by_country
+   - Sleep duration statistics by country
+   Columns:
+   - geo (geo)
+   - country (text)
+   - num_requests (bigint)
+   - p_10 (double precision)
+   - p_25 (double precision)
+   - p_50 (double precision)
+   - p_75 (double precision)
+   - p_90 (double precision)
+
+4. public.bids_delivered_to_slot_proposer
+   - Comprehensive bid delivery analysis
+   Columns:
+   - slot (integer)
+   - adjusted_bid_value (numeric)
+   - delivered_bid_value (numeric)
+   - bid_value (numeric)
+   - winning_bid_value (numeric)
+   - delta (double precision)
+   - missed_slot (boolean)
+   - request_rank (bigint)
+   - adjusted_value_rank (bigint)
+   - delivered_value_rank (bigint)
+   - is_auction_slot (boolean)
+   - we_had_highest_bid (boolean)
+   - over_adjusted (boolean)
+   - slot_start_at (timestamp with time zone)
+   - received_at (timestamp with time zone)
+   - replying_at (timestamp with time zone)
+   - delivered_at (timestamp with time zone)
+   - sleep_duration (integer)
+   - lookback_duration (integer)
+   - ip_address (text)
+   - proposer_pubkey (text)
+   - label (text)
+   - country (text)
+   - city (text)
+   - lat (double precision)
+   - lon (double precision)
+   - distance_to_usm (double precision)
+   - won_auction (boolean)
+
+5. public.unexpected_auction_losses_by_ip
+   - Analysis of unexpected auction losses
+   Columns:
+   - ip_address (text)
+   - country (text)
+   - city (text)
+   - distance_to_usm (double precision)
+   - label (text)
+   - unexplained_lost_auctions (bigint)
+   - actual_lost_value (numeric)
+   - potential_lost_value (numeric)
+   - num_total (bigint)
+   - capture (double precision)
+   - last_call (timestamp with time zone)
+   - total_lost_auctions (bigint)
+   - avg_time_receive_to_reply (double precision)
+   - avg_time_slot_start_to_receive (double precision) 
