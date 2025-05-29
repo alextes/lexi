@@ -2,6 +2,7 @@ on: push
 
 env:
   CARGO_TERM_COLOR: always
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
 name: check-lint-test
 
