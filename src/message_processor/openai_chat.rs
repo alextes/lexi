@@ -27,24 +27,12 @@ pub struct OpenAiCallConfig {
 pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     let available_tools = vec![
         super::tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
+        super::tools::database_schema::DATABASE_SCHEMA_TOOL.clone(),
         super::tools::mevdb_query::MEVDB_QUERY_TOOL.clone(),
-        super::tools::mevdb_schema::MEVDB_SCHEMA_TOOL.clone(),
+        super::tools::globaldb_query::GLOBALDB_QUERY_TOOL.clone(),
+        super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
     ];
-    let instructions = format!(
-        "you are a helpful ai assistant named lexi. use tools if appropriate. \
-        you have the following tools available: \
-        1. '{}': checks if an ethereum beacon chain slot was missed. params: 'slot_number' (integer). \
-        2. '{}': executes a sql select query against a read-only mev database. params: 'sql_query' (string). \
-        3. '{}': retrieves the schema for the mev database. use this if you need to understand table structures before using the '{}' tool. this tool takes no parameters. \
-        for example, to query the mev database, you might first call '{}' to get the schema, and then use that information to formulate a query for '{}'. \
-        ensure your queries/parameters target these tools and their specified inputs correctly.",
-        super::tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME,
-        super::tools::mevdb_query::MEVDB_TOOL_NAME,
-        super::tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME,
-        super::tools::mevdb_query::MEVDB_TOOL_NAME,
-        super::tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME,
-        super::tools::mevdb_query::MEVDB_TOOL_NAME
-    );
+    let instructions = "you are a helpful ai assistant named lexi.".to_string();
     OpenAiCallConfig {
         available_tools,
         instructions,
@@ -72,7 +60,7 @@ fn summarize_conversation_history(history: &[InputItem]) -> Vec<String> {
 // this is the core loop that handles sequences of api calls if tools are involved.
 pub(super) async fn process_openai_response_loop(
     ctx: &super::HandlerContext<'_>,
-    telegram_chat_id: i64, // for logging consistency
+    logging_chat_id: i64, // keep this for context specific logging if needed, or rename/remove if truly generic
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>, // pass directly, from OPENAI_CALL_CONFIG
@@ -125,7 +113,7 @@ pub(super) async fn process_openai_response_loop(
         if !function_calls_to_execute.is_empty() {
             let num_fc_this_turn = function_calls_to_execute.len();
             info!(
-                chat_id = telegram_chat_id,
+                chat_id = logging_chat_id, // keep using logging_chat_id for this specific log
                 response_id = %current_response_id,
                 num_function_calls = num_fc_this_turn,
                 "processing response with {} function call(s).", num_fc_this_turn
@@ -137,26 +125,36 @@ pub(super) async fn process_openai_response_loop(
                     {
                         super::tools::beacon_slot_check::execute_beacon_slot_check(
                             ctx,
-                            telegram_chat_id,
                             &fc_request.arguments,
                         )
                         .await
                     } else if fc_request.name == super::tools::mevdb_query::MEVDB_TOOL_NAME {
                         super::tools::mevdb_query::execute_mevdb_query_tool(
                             ctx,
-                            telegram_chat_id,
                             &fc_request.arguments,
                         )
                         .await
-                    } else if fc_request.name == super::tools::mevdb_schema::MEVDB_SCHEMA_TOOL_NAME {
-                        super::tools::mevdb_schema::execute_get_mevdb_schema(
+                    } else if fc_request.name == super::tools::database_schema::DATABASE_SCHEMA_TOOL_NAME {
+                        super::tools::database_schema::execute_get_database_schema(
                             ctx,
-                            telegram_chat_id,
+                            &fc_request.arguments,
+                        )
+                        .await
+                    } else if fc_request.name == super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
+                        super::tools::conversation_admin::execute_conversation_admin_command(
+                            ctx,
+                            &fc_request.arguments,
+                        )
+                        .await
+                    } else if fc_request.name == super::tools::globaldb_query::GLOBALDB_TOOL_NAME {
+                        super::tools::globaldb_query::execute_globaldb_query_tool(
+                            ctx,
+                            &fc_request.arguments,
                         )
                         .await
                     } else {
                         warn!(
-                            chat_id = telegram_chat_id,
+                            chat_id = logging_chat_id, // keep using logging_chat_id
                             function_call = ?fc_request,
                             "openai_chat module received unexpected function call name during parallel execution planning"
                         );
@@ -176,7 +174,7 @@ pub(super) async fn process_openai_response_loop(
                     Ok(output_str) => output_str,
                     Err(e) => {
                         any_tool_execution_failed = true;
-                        error!(chat_id = telegram_chat_id, tool_name = %original_fc.name, error = %e, "tool execution failed");
+                        error!(chat_id = logging_chat_id, tool_name = %original_fc.name, error = %e, "tool execution failed");
                         format!(
                             "{{\"error\": \"tool_execution_failed\", \"tool_name\": \"{}\", \"details\": \"{}\"}}",
                             original_fc.name,
@@ -196,12 +194,12 @@ pub(super) async fn process_openai_response_loop(
             }
 
             if any_tool_execution_failed {
-                warn!(chat_id = telegram_chat_id, "one or more tool executions failed. results (including errors) will be sent to openai.");
+                warn!(chat_id = logging_chat_id, "one or more tool executions failed. results (including errors) will be sent to openai.");
             }
 
             // now, call the api again with the accumulated history including tool results.
             debug!(
-                chat_id = telegram_chat_id,
+                chat_id = logging_chat_id, // keep logging_chat_id
                 response_id = %current_response_id,
                 history_summary = ?summarize_conversation_history(&conversation_history),
                 "sending updated conversation history to api (after tool results)"
@@ -234,7 +232,7 @@ pub(super) async fn process_openai_response_loop(
                                                       // conversation_history is already updated for the next iteration
                 }
                 Err(e) => {
-                    error!(chat_id = telegram_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed. cannot continue processing this interaction.");
+                    error!(chat_id = logging_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed. cannot continue processing this interaction.");
                     return Ok((
                         format!("a critical error occurred while trying to process tool results with the ai: {}. please try again.", e),
                         current_response_id // return the id of the last successful response before this error
@@ -245,11 +243,11 @@ pub(super) async fn process_openai_response_loop(
             // no function calls, and we have assistant message(s) -> this is the final response for this turn.
             let final_text = assistant_messages_in_current_turn.join("\n"); // join if multiple message bubbles, though typically one.
             info!(
-                chat_id = telegram_chat_id, response_id = %current_response_id,
+                chat_id = logging_chat_id, response_id = %current_response_id,
                 "received final assistant message"
             );
             debug!(
-                chat_id = telegram_chat_id,
+                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 final_history_summary = ?summarize_conversation_history(&conversation_history),
                 "final conversation history state"
@@ -258,11 +256,11 @@ pub(super) async fn process_openai_response_loop(
         } else {
             // no function calls and no assistant messages this turn.
             warn!(
-                chat_id = telegram_chat_id, response_id = %current_response_id,
+                chat_id = logging_chat_id, response_id = %current_response_id,
                 "openai api response output was empty or contained no actionable items (no text, no tools)."
             );
             debug!(
-                chat_id = telegram_chat_id,
+                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 empty_turn_history_summary = ?summarize_conversation_history(&conversation_history),
                 "conversation history state on empty/unhandled turn"
@@ -280,14 +278,14 @@ pub(super) async fn process_openai_response_loop(
 // we will rename it for now, then its body will be moved.
 pub async fn start_ai_processing_loop(
     ctx: &super::HandlerContext<'_>,
-    telegram_chat_id: i64,
+    logging_chat_id: i64, // keep this, as it's used by process_openai_response_loop
     initial_api_response: OpenAiApiResponse, // This will be the response from the first call made by drive_ai_conversation
     initial_input_items: Vec<InputItem>,     // The input items that led to initial_api_response
 ) -> Result<(String, String)> {
     // now pass to the loop for potential tool use and further calls
     process_openai_response_loop(
         ctx,
-        telegram_chat_id,
+        logging_chat_id, // pass this through
         initial_api_response,
         initial_input_items,
         OPENAI_CALL_CONFIG.available_tools.clone(),
