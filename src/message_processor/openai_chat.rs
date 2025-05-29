@@ -8,8 +8,8 @@
 
 use super::AiConversationOutcome;
 use crate::openai_api::{
-    self, call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
-    OpenAiApiResponse, OutputFunctionCall, OutputItem, ToolDefinition,
+    self, CallResponsesApiOptionalArgs, InputItem, InputMessageObject, OpenAiApiResponse,
+    OutputFunctionCall, OutputItem, ToolDefinition,
 };
 use eyre::Result;
 use serde_json::Value as JsonValue;
@@ -173,7 +173,7 @@ pub(super) async fn process_openai_response_loop(
                                 if json_val.get("action").and_then(|v| v.as_str())
                                     == Some("reset_conversation")
                                 {
-                                    info!(chat_id = logging_chat_id, response_id = %current_response_id, "conversation reset triggered by admin tool.");
+                                    info!(response_id = %current_response_id, "conversation reset triggered by admin tool.");
                                     return Ok(AiConversationOutcome::ResetConversation(
                                         tool_output_json_string,
                                         current_response_id,

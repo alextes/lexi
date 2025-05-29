@@ -20,6 +20,7 @@ use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update a
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
+use serde_json::Value;
 use sqlx::PgPool;
 use tracing::{debug, error, info, warn};
 
@@ -290,15 +291,34 @@ pub async fn handle_telegram_update(ctx: &BotContext<'_>, update: &TelegramUpdat
                             .await?;
                         }
                         message_processor::AiConversationOutcome::ResetConversation(
-                            confirmation_message,
+                            confirmation_json_str,
                             _response_id,
                         ) => {
+                            let final_message_to_send = match serde_json::from_str::<Value>(
+                                &confirmation_json_str,
+                            ) {
+                                Ok(json_val) => {
+                                    if let Some(msg_content) =
+                                        json_val.get("message").and_then(|v| v.as_str())
+                                    {
+                                        format!("system message: {}", msg_content)
+                                    } else {
+                                        warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "resetconversation json did not contain a 'message' field. sending raw json.");
+                                        confirmation_json_str.to_string()
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(chat_id = incoming_message.chat.id, error = %e, raw_payload = %confirmation_json_str, "failed to parse resetconversation json. sending raw string.");
+                                    confirmation_json_str.to_string()
+                                }
+                            };
+
                             telegram::send_message(
                                 ctx.http_client,
                                 ctx.api_base_url,
                                 ctx.bot_token,
                                 incoming_message.chat.id,
-                                &confirmation_message,
+                                &final_message_to_send,
                             )
                             .await
                             .wrap_err("failed to send conversation reset confirmation message")?;
