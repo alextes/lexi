@@ -93,7 +93,6 @@ fn parse_api_response_output(
 async fn execute_tool_call(
     ctx: &super::HandlerContext<'_>,
     fc_request: &OutputFunctionCall,
-    logging_chat_id: i64, // Kept for specific tool logging if any tool still uses it internally, though most were removed
 ) -> Result<String> {
     use super::tools::*;
 
@@ -110,9 +109,10 @@ async fn execute_tool_call(
         globaldb_query::execute_globaldb_query_tool(ctx, arguments).await
     } else if tool_name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
         conversation_admin::execute_conversation_admin_command(ctx, arguments).await
+    } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {
+        retrieve_manual::execute_retrieve_manual(ctx, arguments).await
     } else {
         warn!(
-            chat_id = logging_chat_id,
             tool_name = tool_name,
             "received unexpected tool name for execution"
         );
@@ -125,6 +125,7 @@ async fn execute_tool_call(
 
 // processes the response from the openai api, handling direct messages or dispatching to tool handlers.
 // this is the core loop that handles sequences of api calls if tools are involved.
+#[tracing::instrument(skip_all, fields(chat_id = logging_chat_id))]
 pub(super) async fn process_openai_response_loop(
     ctx: &super::HandlerContext<'_>,
     logging_chat_id: i64,
@@ -154,14 +155,13 @@ pub(super) async fn process_openai_response_loop(
 
         if !function_calls_to_execute.is_empty() {
             info!(
-                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 num_function_calls = function_calls_to_execute.len(),
                 "processing response with {} function call(s).", function_calls_to_execute.len()
             );
 
             for fc_request in function_calls_to_execute {
-                match execute_tool_call(ctx, &fc_request, logging_chat_id).await {
+                match execute_tool_call(ctx, &fc_request).await {
                     Ok(tool_output_json_string) => {
                         if fc_request.name
                             == super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
@@ -189,7 +189,7 @@ pub(super) async fn process_openai_response_loop(
                         ));
                     }
                     Err(e) => {
-                        error!(chat_id = logging_chat_id, tool_name = %fc_request.name, error = %e, "tool execution failed");
+                        error!(tool_name = %fc_request.name, error = %e, "tool execution failed");
                         let error_output = format!(
                             "{{\"error\": \"tool_execution_failed\", \"tool_name\": \"{}\", \"details\": \"{}\"}}",
                             fc_request.name,
@@ -208,7 +208,6 @@ pub(super) async fn process_openai_response_loop(
 
             // now, call the api again with the accumulated history including tool results.
             debug!(
-                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 history_summary = ?summarize_conversation_history(&conversation_history),
                 "sending updated conversation history to api (after tool results)"
@@ -240,15 +239,14 @@ pub(super) async fn process_openai_response_loop(
                     api_response = next_api_response;
                 }
                 Err(e) => {
-                    error!(chat_id = logging_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed.");
+                    error!(response_id = %current_response_id, error= %e, "api call after tool results failed.");
                     return Err(eyre::eyre!("api call after tool results failed: {}", e));
                 }
             }
         } else if let Some(final_text) = assistant_text_content_this_turn {
             // Use the text we parsed earlier if it exists and no tool calls were made.
-            info!(chat_id = logging_chat_id, response_id = %current_response_id, "received final assistant message");
+            info!(response_id = %current_response_id, "received final assistant message");
             debug!(
-                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 final_history_summary = ?summarize_conversation_history(&conversation_history),
                 "final conversation history state"
@@ -258,9 +256,8 @@ pub(super) async fn process_openai_response_loop(
                 current_response_id,
             ));
         } else {
-            warn!(chat_id = logging_chat_id, response_id = %current_response_id, "openai api response output was empty or contained no actionable items.");
+            warn!(response_id = %current_response_id, "openai api response output was empty or contained no actionable items.");
             debug!(
-                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 empty_turn_history_summary = ?summarize_conversation_history(&conversation_history),
                 "conversation history state on empty/unhandled turn"
