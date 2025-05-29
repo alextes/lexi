@@ -2,7 +2,6 @@ on: push
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
   SQLX_OFFLINE: "true"
 
 name: check-lint-test
@@ -38,6 +37,18 @@ jobs:
 
   check-schema:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     continue-on-error: true
     env:
       SQLX_OFFLINE: "true"
@@ -69,6 +80,8 @@ jobs:
           tool: sqlx-cli
 
       - run: cargo sqlx prepare --check -- --all-targets
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
   lint:
     strategy:
@@ -141,6 +154,4 @@ jobs:
 
       - run: cargo test -- --nocapture
         env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
