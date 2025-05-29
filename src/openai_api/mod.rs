@@ -196,12 +196,9 @@ mod tests {
         let mut params_props = HashMap::new();
         params_props.insert(
             "sql_query".to_string(),
-            ToolFunctionParameterProperty {
-                r#type: "string".to_string(),
-                description: Some(
-                    "the sql select query to execute. must start with 'select'.".to_string(),
-                ),
-            },
+            ToolFunctionParameterPropertyBuilder::new_string()
+                .description("the sql select query to execute. must start with 'select'.")
+                .build(),
         );
         let tool_params = ToolFunctionParameters {
             r#type: "object".to_string(),

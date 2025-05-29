@@ -1,6 +1,9 @@
 use crate::env::ENV_CONFIG;
 use crate::message_processor::HandlerContext;
-use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
+use crate::openai_api::{
+    ToolDefinition, ToolFunctionParameterPropertyBuilder,
+    ToolFunctionParameters,
+};
 use eyre::Result;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::{Column, PgPool, Row, ValueRef};
@@ -10,19 +13,15 @@ use tracing::{error, info, warn};
 
 pub const GLOBALDB_TOOL_NAME: &str = "execute_globaldb_query";
 
-// --- tool definition ---
 pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     let mut params_props = HashMap::new();
     params_props.insert(
         "sql_query".to_string(),
-        ToolFunctionParameterProperty {
-            r#type: "string".to_string(),
-            description: Some(
+        ToolFunctionParameterPropertyBuilder::new_string()
+            .description(
                 "the sql select query to execute against the global-specific database. must start with 'select'. provide the full query."
-                    .to_string(),
-            ),
-            r#enum: None,
-        },
+            )
+            .build(),
     );
     let tool_params = ToolFunctionParameters {
         r#type: "object".to_string(),
@@ -40,7 +39,6 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-// --- tool execution logic for globaldb ---
 async fn execute_globaldb_db_query(query: &str) -> JsonValue {
     info!(query = %query, "(globaldb executor) attempting to execute db query");
 
@@ -133,7 +131,6 @@ async fn execute_globaldb_db_query(query: &str) -> JsonValue {
     }
 }
 
-// --- new simplified tool execution function ---
 pub async fn execute_globaldb_query_tool(
     _ctx: &HandlerContext<'_>, // Context might be needed for future enhancements or if db pool is on ctx
     arguments_json_str: &str,  // The arguments string from OutputFunctionCall
@@ -169,6 +166,3 @@ pub async fn execute_globaldb_query_tool(
         }
     }
 }
-
-// note: tests for globaldb_query would require a separate test database setup or mocking.
-// for now, the query execution logic is identical to execute_sql_query, which is tested.

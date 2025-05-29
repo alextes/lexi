@@ -28,11 +28,11 @@ pub struct HandlerContext<'a> {
 pub async fn drive_ai_conversation(
     ctx: &HandlerContext<'_>,
     prompt_text: &str,
-    logging_chat_id: i64, // Used for logging within openai_chat and its tools
+    logging_chat_id: i64, // This is used for logging within openai_chat and its tools
     previous_response_id: Option<&str>,
 ) -> Result<(String, String)> {
     info!(
-        chat_id = logging_chat_id,
+        logging_id = logging_chat_id, // Changed from chat_id to logging_id for clarity
         prompt = prompt_text,
         has_previous_id = previous_response_id.is_some(),
         "(core ai) driving conversation for prompt: '{}'",
@@ -68,7 +68,7 @@ pub async fn drive_ai_conversation(
                 .wrap_err("core ai conversation processing loop failed")
         }
         Err(e) => {
-            error!(chat_id = logging_chat_id, error = %e, "(core_ai) initial /v1/responses api call failed");
+            error!(logging_id = logging_chat_id, error = %e, "(core_ai) initial /v1/responses api call failed"); // Changed from chat_id
             Err(e)
         }
     }
@@ -77,12 +77,12 @@ pub async fn drive_ai_conversation(
 pub async fn process_single_prompt_for_cli(
     ctx: &HandlerContext<'_>,
     prompt_text: &str,
-    telegram_chat_id: i64, // Used as logging_chat_id
+    logging_chat_id: i64, // Renamed from telegram_chat_id as it's used as logging_chat_id
 ) -> Result<(String, String)> {
     info!(
-        chat_id = telegram_chat_id,
+        logging_id = logging_chat_id, // Changed from chat_id
         prompt = prompt_text,
         "(cli_wrapper) processing single prompt via core ai driver"
     );
-    drive_ai_conversation(ctx, prompt_text, telegram_chat_id, None).await
+    drive_ai_conversation(ctx, prompt_text, logging_chat_id, None).await
 }

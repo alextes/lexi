@@ -1,6 +1,8 @@
 use crate::env::ENV_CONFIG;
 use crate::message_processor::HandlerContext;
-use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
+use crate::openai_api::{
+    ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
+};
 use eyre::Result;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::{Column, PgPool, Row, ValueRef};
@@ -10,18 +12,15 @@ use tracing::{error, info, warn};
 
 pub const MEVDB_TOOL_NAME: &str = "execute_mevdb_query";
 
-// --- tool definition ---
 pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     let mut params_props = HashMap::new();
     params_props.insert(
         "sql_query".to_string(),
-        ToolFunctionParameterProperty {
-            r#type: "string".to_string(),
-            description: Some(
+        ToolFunctionParameterPropertyBuilder::new_string()
+            .description(
                 "the sql select query to execute against the mev-specific database. must start with 'select'. provide the full query."
-                    .to_string(),
-            ),
-        },
+            )
+            .build(),
     );
     let tool_params = ToolFunctionParameters {
         r#type: "object".to_string(),
@@ -39,7 +38,6 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-// --- tool execution logic for mevdb ---
 async fn execute_mevdb_db_query(query: &str) -> JsonValue {
     info!(query = %query, "(mevdb executor) attempting to execute db query");
 
@@ -132,24 +130,22 @@ async fn execute_mevdb_db_query(query: &str) -> JsonValue {
     }
 }
 
-// --- new simplified tool execution function ---
 pub async fn execute_mevdb_query_tool(
     _ctx: &HandlerContext<'_>, // Context might be needed for future enhancements or if db pool is on ctx
-    telegram_chat_id: i64,     // For logging
     arguments_json_str: &str,  // The arguments string from OutputFunctionCall
 ) -> Result<String> {
     // Returns a JSON string (query results or error)
-    info!(chat_id = telegram_chat_id, args = %arguments_json_str, "executing execute_mevdb_query tool");
+    info!(args = %arguments_json_str, "executing execute_mevdb_query tool");
 
     match serde_json::from_str::<HashMap<String, String>>(arguments_json_str) {
         Ok(args_map) => {
             if let Some(sql_query_from_ai) = args_map.get("sql_query") {
-                info!(chat_id = telegram_chat_id, query = %sql_query_from_ai, "parsed sql_query from ai arguments");
+                info!(query = %sql_query_from_ai, "parsed sql_query from ai arguments");
                 let result_json_value = execute_mevdb_db_query(sql_query_from_ai).await;
                 Ok(result_json_value.to_string())
             } else {
                 let err_msg = "argument 'sql_query' missing";
-                warn!(chat_id = telegram_chat_id, args = %arguments_json_str, err_msg);
+                warn!(args = %arguments_json_str, err_msg);
                 Ok(json!({
                     "status": "error",
                     "message": err_msg,
@@ -159,7 +155,7 @@ pub async fn execute_mevdb_query_tool(
         }
         Err(e) => {
             let err_msg = format!("failed to parse arguments json: {}", e);
-            warn!(chat_id = telegram_chat_id, args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
             Ok(json!({
                 "status": "error",
                 "message": "failed to parse tool arguments as json.",
@@ -169,10 +165,3 @@ pub async fn execute_mevdb_query_tool(
         }
     }
 }
-
-// note: tests for mevdb_query would require a separate test database setup or mocking.
-// for now, the query execution logic is identical to execute_sql_query, which is tested.
-
-// TODO: alex notes that mevdb_query execution is still failing in some scenarios (e.g. main bot loop).
-// this needs further debugging and dedicated test coverage to ensure reliability,
-// especially around database connection and error propagation through the OpenAI step 2 call.
