@@ -79,17 +79,16 @@ async fn fetch_beacon_header(
 
 pub async fn execute_beacon_slot_check(
     ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64,    // For logging
     arguments_json_str: &str, // The arguments string from OutputFunctionCall
 ) -> Result<String> {
     // Returns a JSON string (SlotStatus or error)
-    info!(chat_id = telegram_chat_id, args = %arguments_json_str, "executing check_beacon_slot_missed tool");
+    info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
 
     let beacon_node_url = match ENV_CONFIG.beacon_url.as_ref() {
         Some(url) => url.as_str(),
         None => {
             let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
-            error!(chat_id = telegram_chat_id, err_msg);
+            error!(err_msg);
             return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
         }
     };
@@ -98,15 +97,11 @@ pub async fn execute_beacon_slot_check(
         Ok(args_map) => {
             if let Some(slot_value) = args_map.get("slot_number") {
                 if let Some(slot_number) = slot_value.as_u64() {
-                    info!(
-                        chat_id = telegram_chat_id,
-                        slot = slot_number,
-                        "checking beacon slot from ai request"
-                    );
+                    info!(slot = slot_number, "checking beacon slot from ai request");
                     match fetch_beacon_header(ctx.http_client, beacon_node_url, slot_number).await {
                         Ok(status) => Ok(status.to_json_string()),
                         Err(e) => {
-                            warn!(chat_id = telegram_chat_id, slot = slot_number, error = %e, "error fetching beacon header");
+                            warn!(slot = slot_number, error = %e, "error fetching beacon header");
                             Ok(SlotStatus::Error(format!(
                                 "error checking slot {}: {}",
                                 slot_number, e
@@ -116,18 +111,18 @@ pub async fn execute_beacon_slot_check(
                     }
                 } else {
                     let err_msg = "argument 'slot_number' was not a valid u64";
-                    warn!(chat_id = telegram_chat_id, args = %arguments_json_str, err_msg);
+                    warn!(args = %arguments_json_str, err_msg);
                     Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
                 }
             } else {
                 let err_msg = "argument 'slot_number' missing";
-                warn!(chat_id = telegram_chat_id, args = %arguments_json_str, err_msg);
+                warn!(args = %arguments_json_str, err_msg);
                 Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
             }
         }
         Err(e) => {
             let err_msg = format!("failed to parse arguments json: {}", e);
-            warn!(chat_id = telegram_chat_id, args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
             Ok(SlotStatus::Error(err_msg).to_json_string())
         }
     }
@@ -140,6 +135,7 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         ToolFunctionParameterProperty {
             r#type: "integer".to_string(),
             description: Some("the beacon chain slot number to check.".to_string()),
+            r#enum: None,
         },
     );
     let tool_params = ToolFunctionParameters {
@@ -157,3 +153,61 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         Some(tool_params),
     )
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Client as ReqwestClient;
+
+    #[tokio::test]
+    async fn test_fetch_beacon_header_slot_not_missed() {
+        // slot 11805092 is an example of a slot that is not missed
+        let slot_not_missed = 11805092;
+        let mut server = mockito::Server::new_async().await;
+        let http_client = ReqwestClient::new();
+
+        let mock_path = format!("/eth/v1/beacon/headers/{}", slot_not_missed);
+        let mock = server
+            .mock("get", mock_path.as_str()) // mockito method matching is case-insensitive
+            .with_status(200)
+            .create_async()
+            .await;
+
+        let result = fetch_beacon_header(&http_client, &server.url(), slot_not_missed).await;
+
+        mock.assert_async().await; // verify the mock was called
+        match result {
+            Ok(SlotStatus::NotMissed) => { /* test passed */ }
+            _ => panic!(
+                "expected slot {} to be slotstatus::notmissed, got {:?}",
+                slot_not_missed, result
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_beacon_header_slot_missed() {
+        // slot 11805091 is an example of a slot that is missed
+        let slot_missed = 11805091;
+        let mut server = mockito::Server::new_async().await;
+        let http_client = ReqwestClient::new();
+
+        let mock_path = format!("/eth/v1/beacon/headers/{}", slot_missed);
+        let mock = server
+            .mock("get", mock_path.as_str())
+            .with_status(404) // 404 indicates a missed slot
+            .create_async()
+            .await;
+
+        let result = fetch_beacon_header(&http_client, &server.url(), slot_missed).await;
+
+        mock.assert_async().await; // verify the mock was called
+        match result {
+            Ok(SlotStatus::Missed) => { /* test passed */ }
+            _ => panic!(
+                "expected slot {} to be slotstatus::missed, got {:?}",
+                slot_missed, result
+            ),
+        }
+    }
+}
