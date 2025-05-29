@@ -1,18 +1,21 @@
-// src/bin/message_processor_cli.rs
+//! this cli application provides a way to test the core ai message processing logic
+//! (`message_processor::process_single_prompt_for_cli` which delegates to `openai_chat`)
+//! directly from the command line, bypassing the full telegram bot loop and database interactions
+//! for conversation history. it takes a text prompt as input and outputs the ai's final response.
+//! this is useful for quick iterative testing of the ai's capabilities, tool usage, and prompt handling
+//! without needing to interact with a live telegram bot.
 
 use clap::Parser;
 use eyre::{Context, Result};
 use lexi::env::ENV_CONFIG;
 use lexi::log;
-use lexi::message_processor::{process_single_prompt_for_cli, HandlerContext};
+use lexi::message_processor::{self, HandlerContext as MessageProcessorHandlerContext}; // Aliasing for clarity
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
 
 // Default IDs for testing if not provided or if we simplify context creation
-const DEFAULT_TEST_CHAT_ID: i64 = 12345; // Telegram chat ID for logging/context
-                                         // const DEFAULT_TEST_LOCAL_CHAT_ID: i32 = 1; // No longer used by this CLI
-                                         // const DEFAULT_TEST_USER_ID: i64 = 54321; // No longer used by this CLI
+const DEFAULT_TEST_CHAT_ID: i64 = 12345; // Telegram chat ID for logging/context in message_processor
 const DEFAULT_BOT_DB_ID: i32 = -1; // Placeholder for HandlerContext
 
 /// a cli to test the message_processor and ai tool usage.
@@ -23,12 +26,7 @@ struct CliArgs {
     prompt: String,
 
     #[clap(long, default_value_t = DEFAULT_TEST_CHAT_ID)]
-    telegram_chat_id: i64,
-    // #[clap(long, default_value_t = DEFAULT_TEST_USER_ID)] // No longer used
-    // telegram_user_id: i64,
-
-    // #[clap(long, default_value_t = DEFAULT_TEST_LOCAL_CHAT_ID)] // No longer used
-    // local_chat_id: i32,
+    logging_chat_id: i64, // Renamed to reflect its purpose more accurately for message_processor
 }
 
 #[tokio::main]
@@ -36,7 +34,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     dotenv::dotenv().ok();
 
-    log::init(ENV_CONFIG.log_json, ENV_CONFIG.log_perf);
+    log::init();
 
     info!("message_processor_cli starting...");
 
@@ -46,13 +44,6 @@ async fn main() -> Result<()> {
         .database_url
         .as_ref()
         .expect("DATABASE_URL is required.");
-    // Note: For mevdb_query_tool to work, MEVDB_DATABASE_URL must be set in .env
-    // For beacon_slot_check_tool, BEACON_URL must be set in .env
-    // These are handled by the tools themselves or expect() in their setup.
-
-    // We don't initialize a pool here as generate_and_send_ai_reply expects one in HandlerContext.
-    // The actual MEVDB pool is created on-demand by its tool.
-    // The main pool is needed for chat history, etc.
     let pool = lexi::db::initialize_database(db_url).await?;
 
     let http_client = ReqwestClient::builder()
@@ -63,25 +54,27 @@ async fn main() -> Result<()> {
     let openai_api_key =
         std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set, it is required.")?;
 
-    // Dummy bot token, as we are not calling telegram API directly for sending messages here
-    let dummy_bot_token = "dummy_token_for_cli".to_string();
-    let dummy_telegram_api_url = "https://api.telegram.org/bot";
-
-    let handler_ctx = HandlerContext {
-        pool: &pool,
+    // Create the simplified HandlerContext for message_processor
+    let mp_handler_ctx = MessageProcessorHandlerContext {
+        pool: &pool, // Pool might be needed by tools called via message_processor
         http_client: &http_client,
-        api_base_url: dummy_telegram_api_url,
-        bot_token: &dummy_bot_token,
-        bot_db_id: DEFAULT_BOT_DB_ID,
+        bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
         openai_api_key: &openai_api_key,
     };
 
     info!(
-        "Calling process_single_prompt_for_cli with prompt: '{}'",
-        cli.prompt
+        "Calling message_processor::process_single_prompt_for_cli with prompt: '{}', logging_chat_id: {}",
+        cli.prompt,
+        cli.logging_chat_id
     );
 
-    match process_single_prompt_for_cli(&handler_ctx, &cli.prompt, cli.telegram_chat_id).await {
+    match message_processor::process_single_prompt_for_cli(
+        &mp_handler_ctx,
+        &cli.prompt,
+        cli.logging_chat_id,
+    )
+    .await
+    {
         Ok((final_text, response_id)) => {
             info!(
                 "AI processing complete. Response ID: {}. Final text:",
@@ -92,7 +85,7 @@ async fn main() -> Result<()> {
             println!("final text:\n{}", final_text);
         }
         Err(e) => {
-            error!(error = %e, "error during ai processing with process_single_prompt_for_cli");
+            error!(error = %e, "error during ai processing with message_processor::process_single_prompt_for_cli");
             eprintln!("error during ai processing: {:?}", e);
         }
     }

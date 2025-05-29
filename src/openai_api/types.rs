@@ -2,14 +2,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
-// --- structs for api request payloads ---
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ToolChoice {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "required")]
+    Required,
+    #[serde(rename = "none")]
+    None,
+}
 
 #[derive(Serialize, Debug, Clone)]
 pub struct CallResponsesApiOptionalArgs<'a> {
     pub model_id: &'a str,
     pub previous_response_id: Option<&'a str>,
     pub tools: Option<Vec<ToolDefinition>>,
-    pub tool_choice: Option<JsonValue>,
+    pub tool_choice: Option<ToolChoice>,
     pub instructions: Option<&'a str>,
     pub temperature: Option<f64>,
     pub store: Option<bool>,
@@ -19,9 +27,6 @@ pub struct CallResponsesApiOptionalArgs<'a> {
 pub struct ToolFunctionParameterProperty {
     pub r#type: String,
     pub description: Option<String>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub r#enum: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,6 +45,29 @@ pub struct ToolDefinition {
     pub description: Option<String>,
     pub parameters: Option<ToolFunctionParameters>,
     pub strict: Option<bool>,
+}
+
+impl ToolDefinition {
+    pub fn new(
+        name: String,
+        description: Option<String>,
+        parameters: Option<ToolFunctionParameters>,
+    ) -> Self {
+        let mut updated_parameters = parameters;
+        if let Some(ref mut params) = updated_parameters {
+            let required_param_names: Vec<String> = params.properties.keys().cloned().collect();
+            params.required = Some(required_param_names);
+            params.additional_properties = false;
+        }
+
+        ToolDefinition {
+            r#type: "function".to_string(),
+            name,
+            description,
+            parameters: updated_parameters,
+            strict: Some(true),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

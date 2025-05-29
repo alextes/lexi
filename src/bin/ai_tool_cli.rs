@@ -4,7 +4,6 @@
 
 use clap::Parser;
 use eyre::Result;
-use lexi::env::ENV_CONFIG;
 use lexi::log;
 
 /// a cli to test ai tool usage.
@@ -30,8 +29,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     dotenv::dotenv().ok();
 
-    // Initialize logging using the central configuration
-    log::init(ENV_CONFIG.log_json, ENV_CONFIG.log_perf);
+    log::init();
 
     let cli = CliArgs::parse();
 

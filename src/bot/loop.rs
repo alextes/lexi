@@ -1,12 +1,18 @@
+//! this module contains the main polling loop for the telegram bot.
+//! it is responsible for continuously polling the telegram api for new updates (messages),
+//! processing these updates by invoking the `bot::handle_telegram_update` function, and handling
+//! potential errors during update fetching or processing. it manages the bot's lifecycle
+//! and telegram api interactions at a high level, including bot token and api url configurations.
+//! this file lives at `src/bot/loop.rs`.
+
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use sqlx::PgPool;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::message_processor;
-use crate::telegram;
-use telegram::types::{ApiResponse, Update};
+use super::{handle_telegram_update, BotContext}; // Use super to refer to items in src/bot/mod.rs
+use crate::telegram::types::{ApiResponse, Update};
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
@@ -18,7 +24,20 @@ pub async fn run_bot_loop(
     bot_db_id: i32,
 ) -> Result<()> {
     let mut last_update_id = 0;
-    info!(bot_db_id, "bot loop started. listening for updates...");
+    info!(
+        bot_db_id,
+        "(bot::loop) bot loop started. listening for updates..."
+    ); // updated log prefix
+
+    let bot_ctx = BotContext {
+        // Use BotContext from super
+        pool: &pool,
+        http_client: &http_client,
+        api_base_url: TELEGRAM_API_URL,
+        bot_token: &bot_token,
+        bot_db_id,
+        openai_api_key: &openai_api_key,
+    };
 
     loop {
         let get_updates_url = format!(
@@ -28,7 +47,7 @@ pub async fn run_bot_loop(
             last_update_id + 1
         );
 
-        debug!("requesting updates: {}", get_updates_url);
+        debug!("(bot::loop) requesting updates: {}", get_updates_url);
 
         let response = http_client
             .get(&get_updates_url)
@@ -36,7 +55,7 @@ pub async fn run_bot_loop(
             .await
             .wrap_err_with(|| {
                 format!(
-                    "failed to send getUpdates request to URL: {}",
+                    "(bot::loop) failed to send getUpdates request to URL: {}",
                     get_updates_url
                 )
             })?;
@@ -46,42 +65,31 @@ pub async fn run_bot_loop(
             let api_response = response
                 .json::<ApiResponse<Vec<Update>>>()
                 .await
-                .wrap_err_with(|| "failed to parse json response from getUpdates")?;
+                .wrap_err_with(|| "(bot::loop) failed to parse json response from getUpdates")?;
 
             if api_response.ok {
                 if let Some(updates) = api_response.result {
                     if updates.is_empty() {
-                        trace!("no new updates received.");
+                        trace!("(bot::loop) no new updates received.");
                     } else {
-                        info!("received {} updates.", updates.len());
+                        info!("(bot::loop) received {} updates.", updates.len());
                     }
                     for update in updates {
                         last_update_id = update.update_id;
-                        debug!(raw_update_object = ?update, "main loop: received update object from api");
+                        debug!(raw_update_object = ?update, "(bot::loop) main loop: received update object from api");
 
-                        // Process each update; if an error occurs, log it and continue.
-                        if let Err(e) = message_processor::process_update(
-                            &pool,
-                            &update,
-                            &http_client,
-                            TELEGRAM_API_URL,
-                            &bot_token,
-                            bot_db_id,
-                            &openai_api_key,
-                        )
-                        .await
+                        if let Err(e) = handle_telegram_update(&bot_ctx, &update).await
+                        // Call handle_telegram_update from super
                         {
                             error!(
                                 update_id = update.update_id,
                                 error = %e,
-                                "failed to process update. continuing to next update."
+                                "(bot::loop) failed to process update via bot::handle_telegram_update. continuing to next update."
                             );
-                            // A more detailed error, including context, could be logged if needed.
-                            // For example, by using: error!(error = format!("{:?}", e), ...)
                         }
                     }
                 } else {
-                    trace!("api response ok, but no updates array in result.");
+                    trace!("(bot::loop) api response ok, but no updates array in result.");
                 }
             } else {
                 warn!(
@@ -90,12 +98,11 @@ pub async fn run_bot_loop(
                         .as_deref()
                         .unwrap_or("unknown error"),
                     error_code = api_response.error_code,
-                    "telegram api error (ok=false)"
+                    "(bot::loop) telegram api error (ok=false)"
                 );
                 if let Some(code) = api_response.error_code {
                     if code == 401 || code == 404 {
-                        error!("critical telegram api error ({}). please check your token. exiting loop.", code);
-                        // This is a critical error, so we return an error to stop the bot loop.
+                        error!("(bot::loop) critical telegram api error ({}). please check your token. exiting loop.", code);
                         return Err(eyre::eyre!(
                             "telegram API error {}: {}",
                             code,
@@ -107,12 +114,8 @@ pub async fn run_bot_loop(
             }
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            // Log HTTP errors but continue loop, as they might be transient.
-            // For critical HTTP errors, we might want to return Err here too.
-            error!(status = %status, body = %error_body, "http error during getUpdates");
+            error!(status = %status, body = %error_body, "(bot::loop) http error during getUpdates");
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
-    } // Loop continues
-      // Unreachable in normal operation unless loop breaks, which it currently doesn't explicitly.
-      // If the loop were to terminate gracefully, Ok(()) would be returned here.
+    }
 }

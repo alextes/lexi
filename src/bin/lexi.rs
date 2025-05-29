@@ -4,7 +4,7 @@ use std::env;
 use std::time::Duration;
 use tracing::info;
 
-use lexi::bot_loop::{run_bot_loop, TELEGRAM_API_URL};
+use lexi::bot::r#loop::{run_bot_loop, TELEGRAM_API_URL};
 use lexi::db;
 use lexi::env::ENV_CONFIG;
 use lexi::log;
@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     dotenv::dotenv().ok();
 
-    log::init(ENV_CONFIG.log_json, ENV_CONFIG.log_perf);
+    log::init();
 
     info!("lexi telegram bot - custom implementation (rust)");
 

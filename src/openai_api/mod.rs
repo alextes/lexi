@@ -52,9 +52,6 @@ pub async fn call_responses_api<'a>(
     if response_status.is_success() {
         match serde_json::from_str::<OpenAiApiResponse>(&response_text) {
             Ok(api_response) => {
-                // Temporary debug logging for the full response
-                dbg!(api_response.clone());
-
                 info!(
                     status = %response_status,
                     id = %api_response.id,
@@ -204,7 +201,6 @@ mod tests {
                 description: Some(
                     "the sql select query to execute. must start with 'select'.".to_string(),
                 ),
-                r#enum: Vec::new(),
             },
         );
         let tool_params = ToolFunctionParameters {

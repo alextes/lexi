@@ -18,16 +18,14 @@ pub static MEVDB_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         required: Some(Vec::new()),   // Changed from None to Some(Vec::new())
         additional_properties: false, // Must be false
     };
-    ToolDefinition {
-        r#type: "function".to_string(),
-        name: MEVDB_SCHEMA_TOOL_NAME.to_string(),
-        description: Some(
+    ToolDefinition::new(
+        MEVDB_SCHEMA_TOOL_NAME.to_string(),
+        Some(
             "retrieves the schema definition for the mev (maximal extractable value) database. this can be used to understand table structures before forming a query for the 'execute_mevdb_query' tool."
                 .to_string(),
         ),
-        parameters: Some(tool_params),
-        strict: Some(true),
-    }
+        Some(tool_params),
+    )
 });
 
 fn get_mevdb_schema_from_file() -> Result<String> {

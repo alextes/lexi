@@ -21,7 +21,6 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
                 "the sql select query to execute against the mev-specific database. must start with 'select'. provide the full query."
                     .to_string(),
             ),
-            r#enum: Vec::new(),
         },
     );
     let tool_params = ToolFunctionParameters {
@@ -30,16 +29,14 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         required: Some(vec!["sql_query".to_string()]),
         additional_properties: false,
     };
-    ToolDefinition {
-        r#type: "function".to_string(),
-        name: MEVDB_TOOL_NAME.to_string(),
-        description: Some(
+    ToolDefinition::new(
+        MEVDB_TOOL_NAME.to_string(),
+        Some(
             "executes a sql select query against a read-only mev (maximal extractable value) database. provide the complete sql query. important tables and columns will be described by the assistant if known."
                 .to_string(),
         ),
-        parameters: Some(tool_params),
-        strict: Some(true),
-    }
+        Some(tool_params),
+    )
 });
 
 // --- tool execution logic for mevdb ---
@@ -172,86 +169,6 @@ pub async fn execute_mevdb_query_tool(
         }
     }
 }
-
-// --- OLD tool call handling (to be removed/replaced by logic in openai_chat.rs) ---
-/*
-pub async fn handle_mevdb_query_tool_call(
-    ctx: &HandlerContext<'_>,
-    telegram_chat_id: i64,
-    function_call: &OutputFunctionCall,
-    original_input_items: Vec<InputItem>,
-    initial_api_response_id: &str,
-    available_tools: Vec<ToolDefinition>,
-    instructions: &str,
-) -> Result<(String, String)> {
-    info!(chat_id = telegram_chat_id, args = %function_call.arguments, "received call for {}", function_call.name);
-
-    match serde_json::from_str::<HashMap<String, String>>(&function_call.arguments) {
-        Ok(args_map) => {
-            if let Some(sql_query_from_ai) = args_map.get("sql_query") {
-                info!(query = %sql_query_from_ai, "executing mevdb query from ai");
-
-                let result_json_value = execute_mevdb_db_query(sql_query_from_ai).await;
-                let result_json_string = result_json_value.to_string();
-
-                let step2_ctx = ToolStep2Context {
-                    telegram_chat_id,
-                    function_name: &function_call.name,
-                    function_id: &function_call.id,
-                    function_call_id: &function_call.call_id,
-                    function_arguments: &function_call.arguments,
-                    original_input_items,
-                    initial_api_response_id,
-                    available_tools: available_tools.clone(),
-                    instructions,
-                    tool_output_json_string: result_json_string,
-                };
-
-                match handle_tool_call_step2_openai_response(ctx, step2_ctx).await {
-                    Ok((api_response_step2, updated_input_items)) => {
-                        // Pass to the main OpenAI response processor
-                        Box::pin(process_openai_response(
-                            ctx,
-                            telegram_chat_id,
-                            api_response_step2,
-                            updated_input_items,
-                            available_tools,
-                            instructions,
-                        ))
-                        .await
-                    }
-                    Err(e) => {
-                        // Step 2 API call itself failed
-                        error!(chat_id = telegram_chat_id, tool_name = function_call.name, error = %e, "step 2 api call failed for mevdb_query_tool");
-                        let fallback_text = format!(
-                            "i tried to use the {} tool, but the final step of consulting the ai failed: {}. you might want to try again.",
-                            function_call.name,
-                            e
-                        );
-                        Ok((fallback_text, initial_api_response_id.to_string()))
-                    }
-                }
-            } else {
-                warn!(
-                    chat_id = telegram_chat_id,
-                    "'sql_query' missing in {} args", function_call.name
-                );
-                Err(eyre!(
-                    "argument 'sql_query' missing for mevdb tool {}",
-                    function_call.name
-                ))
-            }
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to parse args for mevdb tool {}", function_call.name);
-            Err(e).context(format!(
-                "failed to parse args for mevdb tool {}",
-                function_call.name
-            ))
-        }
-    }
-}
-*/
 
 // note: tests for mevdb_query would require a separate test database setup or mocking.
 // for now, the query execution logic is identical to execute_sql_query, which is tested.

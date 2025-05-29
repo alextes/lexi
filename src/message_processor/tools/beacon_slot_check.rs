@@ -1,27 +1,18 @@
-// use super::common::handle_tool_call_step2_openai_response; // Removed
-// use super::common::ToolStep2Context; // Removed
 use crate::env::ENV_CONFIG;
-// use crate::message_processor::openai_chat::process_openai_response; // Removed
 use crate::message_processor::HandlerContext;
-use crate::openai_api::{
-    /* InputItem, OutputFunctionCall, */ ToolDefinition,
-    ToolFunctionParameterProperty, // InputItem, OutputFunctionCall removed
-    ToolFunctionParameters,
-};
-use eyre::{eyre, Context, Result}; // eyre, Context might be unused now, will check next
+use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
+use eyre::{eyre, Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tracing::{error, info, warn};
 
-// placeholder - this should be configurable later
-// const BEACON_NODE_URL: &str = "http://localhost:5052"; // Removed const
 pub const BEACON_SLOT_CHECK_TOOL_NAME: &str = "check_beacon_slot_missed";
 
 #[derive(Debug)]
 pub enum SlotStatus {
-    NotMissed,     // Slot had a block
+    NotMissed,     // Slot had a block header
     Missed,        // Slot was missed (404)
     Error(String), // Error during check
 }
@@ -31,12 +22,12 @@ impl SlotStatus {
         match self {
             SlotStatus::NotMissed => json!({
                 "status": "not_missed",
-                "message": "a block was found for the specified slot."
+                "message": "a block header was found for the specified slot."
             })
             .to_string(),
             SlotStatus::Missed => json!({
                 "status": "missed",
-                "message": "the specified slot was missed (no block found)."
+                "message": "the specified slot was missed (no block header found)."
             })
             .to_string(),
             SlotStatus::Error(e) => json!({
@@ -147,9 +138,8 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     params_props.insert(
         "slot_number".to_string(),
         ToolFunctionParameterProperty {
-            r#type: "integer".to_string(), // Changed to integer for slot number
+            r#type: "integer".to_string(),
             description: Some("the beacon chain slot number to check.".to_string()),
-            r#enum: Vec::new(),
         },
     );
     let tool_params = ToolFunctionParameters {
@@ -158,14 +148,12 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         required: Some(vec!["slot_number".to_string()]),
         additional_properties: false,
     };
-    ToolDefinition {
-        r#type: "function".to_string(),
-        name: BEACON_SLOT_CHECK_TOOL_NAME.to_string(),
-        description: Some(
+    ToolDefinition::new(
+        BEACON_SLOT_CHECK_TOOL_NAME.to_string(),
+        Some(
             "checks if a specific beacon chain slot was missed by querying a beacon node. returns if the slot was missed, not missed, or if an error occurred."
                 .to_string(),
         ),
-        parameters: Some(tool_params),
-        strict: Some(true),
-    }
+        Some(tool_params),
+    )
 });
