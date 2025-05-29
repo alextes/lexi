@@ -32,6 +32,7 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         super::tools::mevdb_query::MEVDB_QUERY_TOOL.clone(),
         super::tools::globaldb_query::GLOBALDB_QUERY_TOOL.clone(),
         super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
+        super::tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
     ];
     let instructions = "you are a helpful ai assistant named lexi.".to_string();
     OpenAiCallConfig {
