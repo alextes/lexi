@@ -290,6 +290,248 @@ pub async fn start_ai_processing_loop(
     .await
 }
 
-// process_single_prompt_for_cli is removed from this module.
-// its logic is covered by message_processor::process_single_prompt_for_cli
-// calling message_processor::drive_ai_conversation.
+#[cfg(test)]
+mod tests {
+    use super::*; // imports functions from openai_chat.rs
+    use crate::openai_api::{
+        // imports types for constructing test data
+        FunctionCallOutputItem,
+        InputMessageObject,
+        OutputFunctionCall,
+        OutputItem,
+        OutputMessage,
+        OutputTextContent,
+    };
+
+    // --- tests for summarize_conversation_history ---
+    #[test]
+    fn test_summarize_empty_history() {
+        let history: Vec<InputItem> = Vec::new();
+        assert_eq!(
+            summarize_conversation_history(&history),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn test_summarize_user_message() {
+        let history = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+        })];
+        assert_eq!(
+            summarize_conversation_history(&history),
+            vec!["user_message"]
+        );
+    }
+
+    #[test]
+    fn test_summarize_assistant_message() {
+        let history = vec![InputItem::Message(InputMessageObject {
+            role: "assistant".to_string(),
+            content: "world".to_string(),
+        })];
+        assert_eq!(
+            summarize_conversation_history(&history),
+            vec!["assistant_message"]
+        );
+    }
+
+    #[test]
+    fn test_summarize_tool_message() {
+        // Role "tool" for InputMessageObject is not typical for input, but testing completeness
+        let history = vec![InputItem::Message(InputMessageObject {
+            role: "tool".to_string(),
+            content: "tool stuff".to_string(),
+        })];
+        assert_eq!(
+            summarize_conversation_history(&history),
+            vec!["tool_message_generic"]
+        );
+    }
+
+    #[test]
+    fn test_summarize_function_call_output() {
+        let history = vec![InputItem::FunctionCallOutput(FunctionCallOutputItem {
+            r#type: "function_call_output".to_string(),
+            call_id: "call_123".to_string(),
+            output: "{{\"result\": \"ok\"}}".to_string(),
+        })];
+        assert_eq!(
+            summarize_conversation_history(&history),
+            vec!["tool_call_output"]
+        );
+    }
+
+    #[test]
+    fn test_summarize_mixed_history() {
+        let history = vec![
+            InputItem::Message(InputMessageObject {
+                role: "user".to_string(),
+                content: "first user message".to_string(),
+            }),
+            InputItem::Message(InputMessageObject {
+                role: "assistant".to_string(),
+                content: "first assistant reply".to_string(),
+            }),
+            InputItem::FunctionCallOutput(FunctionCallOutputItem {
+                r#type: "function_call_output".to_string(),
+                call_id: "call_abc".to_string(),
+                output: "tool output data".to_string(),
+            }),
+            InputItem::Message(InputMessageObject {
+                role: "user".to_string(),
+                content: "second user message".to_string(),
+            }),
+        ];
+        assert_eq!(
+            summarize_conversation_history(&history),
+            vec![
+                "user_message",
+                "assistant_message",
+                "tool_call_output",
+                "user_message"
+            ]
+        );
+    }
+
+    // --- tests for parse_api_response_output ---
+    #[test]
+    fn test_parse_empty_output_items() {
+        let items: Vec<OutputItem> = Vec::new();
+        let (fcs, text) = parse_api_response_output(items);
+        assert!(fcs.is_empty());
+        assert!(text.is_none());
+    }
+
+    #[test]
+    fn test_parse_assistant_text_message() {
+        let items = vec![OutputItem::Message(OutputMessage {
+            id: "msg_1".to_string(),
+            r#type: "message".to_string(),
+            status: "completed".to_string(),
+            role: "assistant".to_string(),
+            content: vec![OutputTextContent {
+                r#type: "output_text".to_string(),
+                text: "hello from assistant".to_string(),
+            }],
+        })];
+        let (fcs, text) = parse_api_response_output(items);
+        assert!(fcs.is_empty());
+        assert_eq!(text, Some("hello from assistant".to_string()));
+    }
+
+    #[test]
+    fn test_parse_single_function_call() {
+        let items = vec![OutputItem::FunctionCall(OutputFunctionCall {
+            r#type: "function_call".to_string(),
+            id: "fc_1".to_string(),
+            call_id: "call_id_1".to_string(),
+            name: "test_tool".to_string(),
+            arguments: "{{\"arg1\": \"val1\"}}".to_string(),
+        })];
+        let (fcs, text) = parse_api_response_output(items);
+        assert_eq!(fcs.len(), 1);
+        assert_eq!(fcs[0].name, "test_tool");
+        assert_eq!(fcs[0].arguments, "{{\"arg1\": \"val1\"}}");
+        assert!(text.is_none());
+    }
+
+    #[test]
+    fn test_parse_assistant_message_then_function_call() {
+        let items = vec![
+            OutputItem::Message(OutputMessage {
+                id: "msg_leading".to_string(),
+                r#type: "message".to_string(),
+                status: "completed".to_string(),
+                role: "assistant".to_string(),
+                content: vec![OutputTextContent {
+                    r#type: "output_text".to_string(),
+                    text: "okay, i will call a tool.".to_string(),
+                }],
+            }),
+            OutputItem::FunctionCall(OutputFunctionCall {
+                r#type: "function_call".to_string(),
+                id: "fc_2".to_string(),
+                call_id: "call_id_2".to_string(),
+                name: "another_tool".to_string(),
+                arguments: "{}".to_string(),
+            }),
+        ];
+        let (fcs, text) = parse_api_response_output(items);
+        assert_eq!(fcs.len(), 1);
+        assert_eq!(fcs[0].name, "another_tool");
+        assert_eq!(text, Some("okay, i will call a tool.".to_string()));
+    }
+
+    #[test]
+    fn test_parse_multiple_function_calls() {
+        let items = vec![
+            OutputItem::FunctionCall(OutputFunctionCall {
+                r#type: "function_call".to_string(),
+                id: "fc_a".to_string(),
+                call_id: "call_id_a".to_string(),
+                name: "tool_one".to_string(),
+                arguments: "{\"a\":1}".to_string(),
+            }),
+            OutputItem::FunctionCall(OutputFunctionCall {
+                r#type: "function_call".to_string(),
+                id: "fc_b".to_string(),
+                call_id: "call_id_b".to_string(),
+                name: "tool_two".to_string(),
+                arguments: "{\"b\":2}".to_string(),
+            }),
+        ];
+        let (fcs, text) = parse_api_response_output(items);
+        assert_eq!(fcs.len(), 2);
+        assert_eq!(fcs[0].name, "tool_one");
+        assert_eq!(fcs[1].name, "tool_two");
+        assert!(text.is_none());
+    }
+
+    #[test]
+    fn test_parse_assistant_message_non_output_text() {
+        let items = vec![OutputItem::Message(OutputMessage {
+            id: "msg_other".to_string(),
+            r#type: "message".to_string(),
+            status: "completed".to_string(),
+            role: "assistant".to_string(),
+            content: vec![OutputTextContent {
+                r#type: "other_type".to_string(), // Not output_text
+                text: "this should be ignored".to_string(),
+            }],
+        })];
+        let (fcs, text) = parse_api_response_output(items);
+        assert!(fcs.is_empty());
+        assert!(text.is_none()); // No output_text content should result in None
+    }
+
+    #[test]
+    fn test_parse_multiple_assistant_messages_concatenated() {
+        let items = vec![
+            OutputItem::Message(OutputMessage {
+                id: "msg_part1".to_string(),
+                r#type: "message".to_string(),
+                status: "completed".to_string(),
+                role: "assistant".to_string(),
+                content: vec![OutputTextContent {
+                    r#type: "output_text".to_string(),
+                    text: "part one.".to_string(),
+                }],
+            }),
+            OutputItem::Message(OutputMessage {
+                id: "msg_part2".to_string(),
+                r#type: "message".to_string(),
+                status: "completed".to_string(),
+                role: "assistant".to_string(),
+                content: vec![OutputTextContent {
+                    r#type: "output_text".to_string(),
+                    text: "part two.".to_string(),
+                }],
+            }),
+        ];
+        let (fcs, text) = parse_api_response_output(items);
+        assert!(fcs.is_empty());
+        assert_eq!(text, Some("part one.\npart two.".to_string()));
+    }
+}
