@@ -3,7 +3,7 @@
 
 use std::{env, sync::LazyLock};
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 const LOG_BLACKLIST: [&str; 1] = ["DATABASE_URL"];
 
@@ -38,14 +38,17 @@ pub fn get_env_var(key: &str) -> Option<String> {
 }
 
 pub fn get_env_bool(key: &str) -> Option<bool> {
-    get_env_var(key).map(|var| match var.to_lowercase().as_str() {
-        "true" => true,
-        "false" => false,
-        "t" => true,
-        "f" => false,
-        "1" => true,
-        "0" => false,
-        str => panic!("invalid bool value {str} for {key}"),
+    get_env_var(key).and_then(|var| match var.to_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        "t" => Some(true),
+        "f" => Some(false),
+        "1" => Some(true),
+        "0" => Some(false),
+        str => {
+            warn!("invalid bool value {str} for {key}");
+            None
+        }
     })
 }
 
@@ -118,6 +121,41 @@ mod tests {
         let test_value = "false";
         std::env::set_var(test_key, test_value);
         assert_eq!(get_env_bool(test_key), Some(false));
+    }
+
+    #[test]
+    fn test_get_env_bool_t() {
+        let test_key = "TEST_KEY_BOOL_T";
+        std::env::set_var(test_key, "t");
+        assert_eq!(get_env_bool(test_key), Some(true));
+    }
+
+    #[test]
+    fn test_get_env_bool_f() {
+        let test_key = "TEST_KEY_BOOL_F";
+        std::env::set_var(test_key, "f");
+        assert_eq!(get_env_bool(test_key), Some(false));
+    }
+
+    #[test]
+    fn test_get_env_bool_one() {
+        let test_key = "TEST_KEY_BOOL_ONE";
+        std::env::set_var(test_key, "1");
+        assert_eq!(get_env_bool(test_key), Some(true));
+    }
+
+    #[test]
+    fn test_get_env_bool_zero() {
+        let test_key = "TEST_KEY_BOOL_ZERO";
+        std::env::set_var(test_key, "0");
+        assert_eq!(get_env_bool(test_key), Some(false));
+    }
+
+    #[test]
+    fn test_get_env_bool_invalid() {
+        let test_key = "TEST_KEY_BOOL_INVALID";
+        std::env::set_var(test_key, "not_a_bool");
+        assert_eq!(get_env_bool(test_key), None);
     }
 
     #[test]
