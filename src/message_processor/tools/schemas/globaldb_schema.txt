@@ -1,0 +1,222 @@
+Details on existing GlobalDB schema to help AI assistant write queries.
+
+Types
+
+	1.	public.geo: ENUM('rbx', 'us-east', 'vin')
+
+Tables
+
+1. public._sqlx_migrations
+
+	•	Columns:
+	•	version (bigint, PRIMARY KEY, NOT NULL)
+	•	description (text, NOT NULL)
+	•	installed_on (timestamp with time zone, NOT NULL, default now())
+	•	success (boolean, NOT NULL)
+	•	checksum (bytea, NOT NULL)
+	•	execution_time (bigint, NOT NULL)
+	•	Indexes:
+	•	_sqlx_migrations_pkey on (CREATE UNIQUE INDEX _sqlx_migrations_pkey ON public._sqlx_migrations USING btree (version))
+
+2. public.adjustment_trace
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('adjustment_trace_id_seq'::regclass), PRIMARY KEY)
+	•	adjusted_block_hash (varchar(66), NOT NULL)
+	•	block_hash (varchar(66), NOT NULL)
+	•	value (numeric(78,0), NOT NULL)
+	•	geo (geo, NOT NULL)
+	•	Indexes:
+	•	adjustment_trace_pkey on (CREATE UNIQUE INDEX adjustment_trace_pkey ON public.adjustment_trace USING btree (id))
+	•	adjustment_trace_adjusted_block_hash_idx on (CREATE INDEX adjustment_trace_adjusted_block_hash_idx ON public.adjustment_trace USING btree (adjusted_block_hash))
+	•	adjustment_trace_block_hash_idx on (CREATE INDEX adjustment_trace_block_hash_idx ON public.adjustment_trace USING btree (block_hash))
+
+3. public.aggregation_checkpoint
+
+	•	Columns:
+	•	id (text, NOT NULL, PRIMARY KEY)
+	•	slot (bigint, NOT NULL)
+	•	Indexes:
+	•	aggregation_checkpoint_pkey on (CREATE UNIQUE INDEX aggregation_checkpoint_pkey ON public.aggregation_checkpoint USING btree (id))
+
+4. public.block_submission
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('block_submission_id_seq'::regclass), PRIMARY KEY)
+	•	block_hash (varchar(66), NOT NULL)
+	•	block_number (bigint, NOT NULL)
+	•	parent_hash (varchar(66), NOT NULL)
+	•	slot (bigint, NOT NULL)
+	•	epoch (bigint, NOT NULL)
+	•	builder_pubkey (varchar(98), NOT NULL)
+	•	proposer_pubkey (varchar(98), NOT NULL)
+	•	proposer_fee_recipient (varchar(42), NOT NULL)
+	•	value (numeric(78,0), NOT NULL)
+	•	gas_limit (bigint, NOT NULL)
+	•	gas_used (bigint, NOT NULL)
+	•	num_tx (integer, NOT NULL)
+	•	execution_payload_id (bigint)
+	•	geo (geo, NOT NULL)
+	•	received_at (timestamp with time zone, NOT NULL)
+	•	inserted_at (timestamp with time zone, NOT NULL, default (now() AT TIME ZONE 'UTC'::text))
+	•	eligible_at (timestamp with time zone)
+	•	signature (text, NOT NULL)
+	•	optimistic_submission (boolean, NOT NULL, default false)
+	•	was_simulated (boolean, NOT NULL, default true)
+	•	sim_success (boolean, NOT NULL)
+	•	sim_error (text, NOT NULL)
+	•	sim_req_error (text, NOT NULL, default ''::text)
+	•	prechecks_duration (bigint, NOT NULL, default 0)
+	•	decode_duration (bigint, NOT NULL, default 0)
+	•	simulation_duration (bigint, NOT NULL, default 0)
+	•	redis_update_duration (bigint, NOT NULL, default 0)
+	•	total_duration (bigint, NOT NULL, default 0)
+	•	Indexes:
+	•	block_submission_pkey on (CREATE UNIQUE INDEX block_submission_pkey ON public.block_submission USING btree (id))
+	•	block_submission_block_hash_idx on (CREATE INDEX block_submission_block_hash_idx ON public.block_submission USING btree (block_hash))
+	•	block_submission_block_number_idx on (CREATE INDEX block_submission_block_number_idx ON public.block_submission USING btree (block_number))
+	•	block_submission_slot_idx on (CREATE INDEX block_submission_slot_idx ON public.block_submission USING btree (slot))
+	•	block_submission_builder_pubkey_idx on (CREATE INDEX block_submission_builder_pubkey_idx ON public.block_submission USING btree (builder_pubkey))
+	•	block_submission_execution_payload_id_idx on (CREATE INDEX block_submission_execution_payload_id_idx ON public.block_submission USING btree (execution_payload_id))
+	•	block_submission_received_at_idx on (CREATE INDEX block_submission_received_at_idx ON public.block_submission USING btree (received_at DESC))
+	•	block_submission_sim_success_idx on (CREATE INDEX block_submission_sim_success_idx ON public.block_submission USING btree (sim_success))
+
+5. public.builder
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('builder_id_seq'::regclass), PRIMARY KEY)
+	•	builder_pubkey (varchar(98), NOT NULL, UNIQUE)
+	•	builder_id (varchar(98), NOT NULL, default ''::character varying)
+	•	description (text, NOT NULL)
+	•	collateral (numeric(78,0), NOT NULL, default 0)
+	•	geo (geo, NOT NULL)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	is_blacklisted (boolean, NOT NULL)
+	•	is_high_prio (boolean, NOT NULL)
+	•	is_optimistic (boolean, NOT NULL, default false)
+	•	num_sent_getpayload (bigint, NOT NULL, default 0)
+	•	Indexes:
+	•	builder_pkey on (CREATE UNIQUE INDEX builder_pkey ON public.builder USING btree (id))
+	•	builder_builder_pubkey_key on (CREATE UNIQUE INDEX builder_builder_pubkey_key ON public.builder USING btree (builder_pubkey))
+	•	builder_builder_pubkey_idx on (CREATE INDEX builder_builder_pubkey_idx ON public.builder USING btree (builder_pubkey))
+
+6. public.builder_demotions
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('builder_demotions_id_seq'::regclass), PRIMARY KEY)
+	•	block_hash (varchar(66), NOT NULL, UNIQUE)
+	•	builder_pubkey (varchar(98), NOT NULL, UNIQUE)
+	•	epoch (bigint, NOT NULL)
+	•	fee_recipient (varchar(42), NOT NULL)
+	•	geo (geo, NOT NULL)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	proposer_pubkey (varchar(98), NOT NULL)
+	•	slot (bigint, NOT NULL)
+	•	value (numeric(78,0))
+	•	signed_beacon_block (json)
+	•	signed_validator_registration (json)
+	•	submit_block_request (json)
+	•	sim_error (text, NOT NULL)
+	•	Indexes:
+	•	builder_demotions_pkey on (CREATE UNIQUE INDEX builder_demotions_pkey ON public.builder_demotions USING btree (id))
+	•	builder_demotions_builder_pubkey_block_hash_key on (CREATE UNIQUE INDEX builder_demotions_builder_pubkey_block_hash_key ON public.builder_demotions USING btree (builder_pubkey, block_hash))
+	•	builder_demotions_builder_pubkey_block_hash_idx on (CREATE UNIQUE INDEX builder_demotions_builder_pubkey_block_hash_idx ON public.builder_demotions USING btree (builder_pubkey, block_hash))
+
+7. public.christian_winning_block_hashes
+
+	•	Columns:
+	•	winning_block_hash (text)
+
+8. public.execution_payload
+
+	•	Columns:
+	•	id (bigint, NOT NULL, PRIMARY KEY)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	slot (bigint, NOT NULL)
+	•	proposer_pubkey (varchar(98), NOT NULL)
+	•	block_hash (varchar(66), NOT NULL)
+	•	version (text, NOT NULL)
+	•	payload (json, NOT NULL)
+	•	Indexes:
+	•	execution_payload_pkey on (CREATE UNIQUE INDEX execution_payload_pkey ON public.execution_payload USING btree (id))
+
+9. public.payload_delivered
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('payload_delivered_id_seq'::regclass), PRIMARY KEY)
+	•	block_hash (varchar(66), NOT NULL, UNIQUE)
+	•	block_number (bigint, NOT NULL)
+	•	parent_hash (varchar(66), NOT NULL)
+	•	slot (bigint, NOT NULL, UNIQUE)
+	•	epoch (bigint, NOT NULL)
+	•	builder_pubkey (varchar(98), NOT NULL)
+	•	proposer_pubkey (varchar(98), NOT NULL, UNIQUE)
+	•	proposer_fee_recipient (varchar(42), NOT NULL)
+	•	value (numeric(78,0))
+	•	gas_limit (bigint, NOT NULL)
+	•	gas_used (bigint, NOT NULL)
+	•	num_tx (integer, NOT NULL)
+	•	excess_blob_gas (bigint, NOT NULL, default 0)
+	•	blob_gas_used (bigint, NOT NULL, default 0)
+	•	num_blobs (integer, NOT NULL, default 0)
+	•	signed_blinded_beacon_block (json)
+	•	signed_at (timestamp without time zone)
+	•	publish_ms (bigint, NOT NULL, default 0)
+	•	geo (geo, NOT NULL)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	Indexes:
+	•	payload_delivered_pkey on (CREATE UNIQUE INDEX payload_delivered_pkey ON public.payload_delivered USING btree (id))
+	•	payload_delivered_block_hash_idx on (CREATE INDEX payload_delivered_block_hash_idx ON public.payload_delivered USING btree (block_hash))
+	•	payload_delivered_block_number_idx on (CREATE INDEX payload_delivered_block_number_idx ON public.payload_delivered USING btree (block_number))
+	•	payload_delivered_slot_idx on (CREATE INDEX payload_delivered_slot_idx ON public.payload_delivered USING btree (slot))
+	•	payload_delivered_builder_pubkey_idx on (CREATE INDEX payload_delivered_builder_pubkey_idx ON public.payload_delivered USING btree (builder_pubkey))
+	•	payload_delivered_proposer_pubkey_idx on (CREATE INDEX payload_delivered_proposer_pubkey_idx ON public.payload_delivered USING btree (proposer_pubkey))
+	•	payload_delivered_value_idx on (CREATE INDEX payload_delivered_value_idx ON public.payload_delivered USING btree (value))
+	•	payload_delivered_slot_proposer_pubkey_block_hash_key on (CREATE UNIQUE INDEX payload_delivered_slot_proposer_pubkey_block_hash_key ON public.payload_delivered USING btree (slot, proposer_pubkey, block_hash))
+
+10. public.promotion_tokens
+
+	•	Columns:
+	•	id (integer, NOT NULL, default nextval('promotion_tokens_id_seq'::regclass), PRIMARY KEY)
+	•	builder_id (text, NOT NULL)
+	•	token (text, NOT NULL, UNIQUE)
+	•	is_used (boolean, NOT NULL, default false)
+	•	expires_at (timestamp with time zone, NOT NULL)
+	•	inserted_at (timestamp with time zone, NOT NULL, default now())
+	•	Indexes:
+	•	promotion_tokens_pkey on (CREATE UNIQUE INDEX promotion_tokens_pkey ON public.promotion_tokens USING btree (id))
+	•	promotion_tokens_token_key on (CREATE UNIQUE INDEX promotion_tokens_token_key ON public.promotion_tokens USING btree (token))
+
+11. public.too_late_get_payload
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('too_late_get_payload_id_seq'::regclass), PRIMARY KEY)
+	•	slot (bigint, NOT NULL, UNIQUE)
+	•	proposer_pubkey (varchar(98), NOT NULL, UNIQUE)
+	•	block_hash (varchar(66), NOT NULL, UNIQUE)
+	•	slot_start_timestamp (bigint, NOT NULL)
+	•	request_timestamp (bigint, NOT NULL)
+	•	decode_timestamp (bigint, NOT NULL)
+	•	ms_into_slot (bigint, NOT NULL)
+	•	geo (geo, NOT NULL)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	Indexes:
+	•	too_late_get_payload_pkey on (CREATE UNIQUE INDEX too_late_get_payload_pkey ON public.too_late_get_payload USING btree (id))
+	•	too_late_get_payload_slot_pk_hash_idx on (CREATE UNIQUE INDEX too_late_get_payload_slot_pk_hash_idx ON public.too_late_get_payload USING btree (slot, proposer_pubkey, block_hash))
+	•	too_late_get_payload_slot_proposer_pubkey_block_hash_key on (CREATE UNIQUE INDEX too_late_get_payload_slot_proposer_pubkey_block_hash_key ON public.too_late_get_payload USING btree (slot, proposer_pubkey, block_hash))
+
+12. public.validator_registration
+
+	•	Columns:
+	•	id (bigint, NOT NULL, default nextval('validator_registration_id_seq'::regclass), PRIMARY KEY)
+	•	pubkey (varchar(98), NOT NULL, UNIQUE)
+	•	timestamp (bigint, NOT NULL, UNIQUE)
+	•	fee_recipient (varchar(42), NOT NULL)
+	•	gas_limit (bigint, NOT NULL)
+	•	signature (text, NOT NULL)
+	•	geo (geo, NOT NULL)
+	•	inserted_at (timestamp without time zone, NOT NULL, default CURRENT_TIMESTAMP)
+	•	Indexes:
+	•	validator_registration_pkey on (CREATE UNIQUE INDEX validator_registration_pkey ON public.validator_registration USING btree (id))
+	•	validator_registration_pubkey_timestamp_key on (CREATE UNIQUE INDEX validator_registration_pubkey_timestamp_key ON public.validator_registration USING btree (pubkey, "timestamp"))
+	•	validator_registration_pubkey_timestamp_idx on (CREATE UNIQUE INDEX validator_registration_pubkey_timestamp_idx ON public.validator_registration USING btree (pubkey, "timestamp")) 

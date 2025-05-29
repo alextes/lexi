@@ -27,6 +27,51 @@ pub struct CallResponsesApiOptionalArgs<'a> {
 pub struct ToolFunctionParameterProperty {
     pub r#type: String,
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#enum: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolFunctionParameterPropertyBuilder {
+    r#type: String,
+    description: Option<String>,
+    r#enum: Option<Vec<String>>,
+}
+
+impl ToolFunctionParameterPropertyBuilder {
+    fn new(r#type: &str) -> Self {
+        ToolFunctionParameterPropertyBuilder {
+            r#type: r#type.to_string(),
+            description: None,
+            r#enum: None,
+        }
+    }
+
+    pub fn new_string() -> Self {
+        Self::new("string")
+    }
+
+    pub fn integer() -> Self {
+        Self::new("integer")
+    }
+
+    pub fn enum_string(mut self, values: &[&str]) -> Self {
+        self.r#enum = Some(values.iter().map(|s| s.to_string()).collect());
+        self
+    }
+
+    pub fn description(mut self, description: &str) -> Self {
+        self.description = Some(description.to_string());
+        self
+    }
+
+    pub fn build(self) -> ToolFunctionParameterProperty {
+        ToolFunctionParameterProperty {
+            r#type: self.r#type,
+            description: self.description,
+            r#enum: self.r#enum,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -92,7 +137,6 @@ pub struct FunctionCallOutputItem {
     pub output: String,
 }
 
-// --- new struct ---
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FunctionCallEchoItem {
     pub r#type: String, // will be "function_call"
@@ -100,9 +144,6 @@ pub struct FunctionCallEchoItem {
     pub name: String,
     pub arguments: String,
 }
-// --- end new struct ---
-
-// --- structs for deserializing api responses ---
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct OutputTextContent {

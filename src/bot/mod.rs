@@ -102,7 +102,7 @@ pub async fn send_reply_and_update_state(
 ) -> Result<()> {
     info!(
         chat_id = telegram_chat_id,
-        "(bot) sending final reply: '{}'", reply_text // updated log prefix
+        "(bot) sending final reply: '{}'", reply_text[..32].to_string()
     );
     let sent_bot_message = telegram::send_message(
         ctx.http_client,
