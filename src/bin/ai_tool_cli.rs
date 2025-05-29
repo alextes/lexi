@@ -40,11 +40,10 @@ async fn main() -> Result<()> {
             //     println!("Example placeholder command with: {}", some_arg);
             // }
         }
-    } else {
-        println!("ai_tool_cli: no command given. see --help for options.");
-        // Optionally, print help here if no command is given and Commands is not Option.
-        // CliArgs::command().display_help(); // This requires clap features or different structure
     }
+    println!("ai_tool_cli: no command given. see --help for options.");
+    // Optionally, print help here if no command is given and Commands is not Option.
+    // CliArgs::command().display_help(); // This requires clap features or different structure
 
     Ok(())
 }

@@ -47,25 +47,25 @@ impl ToolFunctionParameterPropertyBuilder {
         }
     }
 
-    pub fn new_string() -> Self {
+    #[must_use] pub fn new_string() -> Self {
         Self::new("string")
     }
 
-    pub fn integer() -> Self {
+    #[must_use] pub fn integer() -> Self {
         Self::new("integer")
     }
 
-    pub fn enum_string(mut self, values: &[&str]) -> Self {
-        self.r#enum = Some(values.iter().map(|s| s.to_string()).collect());
+    #[must_use] pub fn enum_string(mut self, values: &[&str]) -> Self {
+        self.r#enum = Some(values.iter().map(|s| (*s).to_string()).collect());
         self
     }
 
-    pub fn description(mut self, description: &str) -> Self {
+    #[must_use] pub fn description(mut self, description: &str) -> Self {
         self.description = Some(description.to_string());
         self
     }
 
-    pub fn build(self) -> ToolFunctionParameterProperty {
+    #[must_use] pub fn build(self) -> ToolFunctionParameterProperty {
         ToolFunctionParameterProperty {
             r#type: self.r#type,
             description: self.description,
@@ -93,7 +93,7 @@ pub struct ToolDefinition {
 }
 
 impl ToolDefinition {
-    pub fn new(
+    #[must_use] pub fn new(
         name: String,
         description: Option<String>,
         parameters: Option<ToolFunctionParameters>,

@@ -26,7 +26,7 @@ pub async fn send_message(
     chat_id: i64,
     text: &str,
 ) -> Result<TelegramMessage> {
-    let url = format!("{}{}/sendMessage", api_base_url, bot_token);
+    let url = format!("{api_base_url}{bot_token}/sendMessage");
 
     let params = SendMessageParams { chat_id, text };
 
@@ -37,7 +37,7 @@ pub async fn send_message(
         .json(&params)
         .send()
         .await
-        .wrap_err_with(|| format!("failed to send POST request to {}", url))?;
+        .wrap_err_with(|| format!("failed to send POST request to {url}"))?;
 
     let status = response.status();
     if status.is_success() {
@@ -79,14 +79,14 @@ pub async fn get_me(
     api_base_url: &str,
     bot_token: &str,
 ) -> Result<TelegramUser> {
-    let url = format!("{}{}/getMe", api_base_url, bot_token);
+    let url = format!("{api_base_url}{bot_token}/getMe");
     tracing::debug!(url = %url, "fetching bot details (getMe)");
 
     let response = http_client
         .get(&url)
         .send()
         .await
-        .wrap_err_with(|| format!("failed to send GET request to {}", url))?;
+        .wrap_err_with(|| format!("failed to send GET request to {url}"))?;
 
     let status = response.status();
     if status.is_success() {

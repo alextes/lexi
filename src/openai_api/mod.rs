@@ -30,7 +30,7 @@ pub async fn call_responses_api<'a>(
         model = %args.model_id,
         previous_id = ?args.previous_response_id,
         input_items_count = input_items.len(),
-        tools_count = args.tools.as_ref().map_or(0, |t| t.len()),
+        tools_count = args.tools.as_ref().map_or(0, std::vec::Vec::len),
         "attempting to call openai {} endpoint", "/v1/responses"
     );
 
@@ -108,14 +108,11 @@ mod tests {
     async fn test_call_responses_api_with_input_parameter() {
         let _ = color_eyre::install();
 
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                eprintln!(
-                    "test_call_responses_api_with_input_parameter skipped: OPENAI_API_KEY not set."
-                );
-                return;
-            }
+        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") { key } else {
+            eprintln!(
+                "test_call_responses_api_with_input_parameter skipped: OPENAI_API_KEY not set."
+            );
+            return;
         };
 
         let http_client = ReqwestClient::new();
@@ -145,7 +142,7 @@ mod tests {
                 println!(
                     "test_call_responses_api_with_input_parameter: call successful (2xx status)."
                 );
-                println!("parsed response: {:#?}", parsed_response);
+                println!("parsed response: {parsed_response:#?}");
                 assert_eq!(parsed_response.object, "response");
                 assert!(!parsed_response.output.is_empty());
                 match parsed_response.output.first().unwrap() {
@@ -159,8 +156,7 @@ mod tests {
                     }
                     OutputItem::FunctionCall(fc) => {
                         panic!(
-                            "expected a message output, but got a function call: {:?}",
-                            fc
+                            "expected a message output, but got a function call: {fc:?}"
                         );
                     }
                 }
@@ -169,10 +165,9 @@ mod tests {
                 eprintln!(
                     "test_call_responses_api_with_input_parameter: call failed or returned non-2xx status."
                 );
-                eprintln!("error details: {:?}", e);
+                eprintln!("error details: {e:?}");
                 panic!(
-                    "/v1/responses api call attempt with 'input' parameter resulted in an error: {:?}",
-                    e
+                    "/v1/responses api call attempt with 'input' parameter resulted in an error: {e:?}"
                 );
             }
         }
@@ -181,14 +176,11 @@ mod tests {
     #[tokio::test]
     async fn test_call_responses_api_with_function_tool() {
         let _ = color_eyre::install();
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                eprintln!(
-                    "test_call_responses_api_with_function_tool skipped: OPENAI_API_KEY not set."
-                );
-                return;
-            }
+        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") { key } else {
+            eprintln!(
+                "test_call_responses_api_with_function_tool skipped: OPENAI_API_KEY not set."
+            );
+            return;
         };
         let http_client = ReqwestClient::new();
         let model_id_val = "gpt-4.1";
@@ -248,8 +240,7 @@ mod tests {
         );
         let initial_response = initial_response_result.unwrap();
         println!(
-            "function call test: step 1 - response: {:#?}",
-            initial_response
+            "function call test: step 1 - response: {initial_response:#?}"
         );
 
         assert!(
@@ -259,7 +250,7 @@ mod tests {
         let function_call_item = match initial_response.output.first().unwrap() {
             OutputItem::FunctionCall(fc) => fc,
             OutputItem::Message(msg) => {
-                panic!("expected a function call, got a message: {:?}", msg)
+                panic!("expected a function call, got a message: {msg:?}")
             }
         };
 
@@ -276,8 +267,7 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         println!(
-            "function call test: sql query from model: {}",
-            sql_query_from_model
+            "function call test: sql query from model: {sql_query_from_model}"
         );
 
         let mock_sql_result = serde_json::json!({
@@ -330,8 +320,7 @@ mod tests {
         );
         let final_response = final_response_result.unwrap();
         println!(
-            "function call test: step 2 - final response: {:#?}",
-            final_response
+            "function call test: step 2 - final response: {final_response:#?}"
         );
 
         assert!(
@@ -354,8 +343,7 @@ mod tests {
             }
             OutputItem::FunctionCall(fc) => {
                 panic!(
-                    "expected a final message, but got another function call: {:?}",
-                    fc
+                    "expected a final message, but got another function call: {fc:?}"
                 );
             }
         }

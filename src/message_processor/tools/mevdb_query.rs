@@ -41,16 +41,13 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 async fn execute_mevdb_db_query(query: &str) -> JsonValue {
     info!(query = %query, "(mevdb executor) attempting to execute db query");
 
-    let db_url = match &ENV_CONFIG.mevdb_database_url {
-        Some(url) => url.clone(),
-        None => {
-            warn!("(mevdb executor) MEVDB_DATABASE_URL not configured.");
-            return json!({
-                "status": "error",
-                "message": "mevdb query tool is not configured (missing MEVDB_DATABASE_URL).",
-                "details": "The MEVDB_DATABASE_URL environment variable must be set to use this tool."
-            });
-        }
+    let db_url = if let Some(url) = &ENV_CONFIG.mevdb_database_url { url.clone() } else {
+        warn!("(mevdb executor) MEVDB_DATABASE_URL not configured.");
+        return json!({
+            "status": "error",
+            "message": "mevdb query tool is not configured (missing MEVDB_DATABASE_URL).",
+            "details": "The MEVDB_DATABASE_URL environment variable must be set to use this tool."
+        });
     };
 
     let pool_result = PgPool::connect(&db_url).await;
@@ -154,7 +151,7 @@ pub async fn execute_mevdb_query_tool(
             }
         }
         Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {}", e);
+            let err_msg = format!("failed to parse arguments json: {e}");
             warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
             Ok(json!({
                 "status": "error",

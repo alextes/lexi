@@ -55,7 +55,7 @@ pub fn mentions_bot(
     }
 }
 
-pub fn extract_prompt_from_mention(
+#[must_use] pub fn extract_prompt_from_mention(
     text: &str,
     entities_option: &Option<Vec<MessageEntity>>,
 ) -> String {
@@ -114,8 +114,7 @@ pub async fn send_reply_and_update_state(
     .await
     .wrap_err_with(|| {
         format!(
-            "(bot) failed to send final reply to chat_id {}", // updated log prefix
-            telegram_chat_id
+            "(bot) failed to send final reply to chat_id {telegram_chat_id}"
         )
     })?;
 
@@ -174,17 +173,14 @@ pub async fn handle_telegram_update(
     debug!(?update, "(bot) processing update"); // updated log prefix
 
     if let Some(incoming_message) = &update.message {
-        let sender_data = match &incoming_message.from {
-            Some(user) => user,
-            None => {
-                warn!(
-                    message_id = incoming_message.message_id,
-                    chat_id = incoming_message.chat.id,
-                    "(bot) message has no sender (e.g., channel post), skipping." // updated log prefix
-                );
-                log_other_mentions(incoming_message); 
-                return Ok(());
-            }
+        let sender_data = if let Some(user) = &incoming_message.from { user } else {
+            warn!(
+                message_id = incoming_message.message_id,
+                chat_id = incoming_message.chat.id,
+                "(bot) message has no sender (e.g., channel post), skipping." // updated log prefix
+            );
+            log_other_mentions(incoming_message); 
+            return Ok(());
         };
 
         let local_user_id = db::upsert_user(ctx.pool, sender_data)
@@ -308,8 +304,7 @@ pub async fn handle_telegram_update(
                     Err(e) => {
                         error!(chat_id = incoming_message.chat.id, error = %e, "(bot) error from drive_ai_conversation"); // updated log prefix
                         let fallback_text = format!(
-                            "sorry, an error occurred while generating the ai reply: {}",
-                            e
+                            "sorry, an error occurred while generating the ai reply: {e}"
                         );
                         let _ = send_reply_and_update_state(
                             ctx,

@@ -19,5 +19,5 @@ pub fn init() {
         builder.json().init();
     } else {
         builder.init();
-    };
+    }
 }

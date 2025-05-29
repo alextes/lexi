@@ -31,13 +31,13 @@ pub fn get_env_var(key: &str) -> Option<String> {
         let output = obfuscate_if_secret(&LOG_BLACKLIST, key, existing_var);
         debug!("env var {key}: {output}");
     } else {
-        debug!("env var {key} requested but not found")
-    };
+        debug!("env var {key} requested but not found");
+    }
 
     var
 }
 
-pub fn get_env_bool(key: &str) -> Option<bool> {
+#[must_use] pub fn get_env_bool(key: &str) -> Option<bool> {
     get_env_var(key).and_then(|var| match var.to_lowercase().as_str() {
         "true" => Some(true),
         "false" => Some(false),
@@ -70,7 +70,7 @@ pub struct EnvConfig {
     pub mevdb_database_url: Option<String>,
 }
 
-pub fn get_env_config() -> EnvConfig {
+#[must_use] pub fn get_env_config() -> EnvConfig {
     EnvConfig {
         beacon_url: get_env_var("BEACON_URL"),
         bot_admin_code: get_env_var("BOT_ADMIN_CODE"),

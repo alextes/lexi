@@ -97,7 +97,7 @@ pub async fn execute_get_database_schema(
             }
         }
         Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {}", e);
+            let err_msg = format!("failed to parse arguments json: {e}");
             warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
             Ok(json!({
                 "status": "error",

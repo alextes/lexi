@@ -18,7 +18,7 @@ use tracing::{error, info};
 const DEFAULT_TEST_CHAT_ID: i64 = 12345; // Telegram chat ID for logging/context in message_processor
 const DEFAULT_BOT_DB_ID: i32 = -1; // Placeholder for HandlerContext
 
-/// a cli to test the message_processor and ai tool usage.
+/// a cli to test the `message_processor` and ai tool usage.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
@@ -81,12 +81,12 @@ async fn main() -> Result<()> {
                 response_id
             );
             println!("ai interaction successful.");
-            println!("response id: {}", response_id);
-            println!("final text:\n{}", final_text);
+            println!("response id: {response_id}");
+            println!("final text:\n{final_text}");
         }
         Err(e) => {
             error!(error = %e, "error during ai processing with message_processor::process_single_prompt_for_cli");
-            eprintln!("error during ai processing: {:?}", e);
+            eprintln!("error during ai processing: {e:?}");
         }
     }
 

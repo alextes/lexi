@@ -45,7 +45,7 @@ async fn fetch_beacon_header(
     beacon_node_url: &str,
     slot: u64,
 ) -> Result<SlotStatus> {
-    let request_url = format!("{}/eth/v1/beacon/headers/{}", beacon_node_url, slot);
+    let request_url = format!("{beacon_node_url}/eth/v1/beacon/headers/{slot}");
     info!(url = %request_url, "fetching beacon header for slot");
 
     match http_client.get(&request_url).send().await {
@@ -65,8 +65,7 @@ async fn fetch_beacon_header(
                     .unwrap_or_else(|_| "failed to get error body".to_string());
                 warn!(slot = slot, status = %status, body = %err_text, "error response from beacon node");
                 Ok(SlotStatus::Error(format!(
-                    "beacon node returned status {} - {}",
-                    status, err_text
+                    "beacon node returned status {status} - {err_text}"
                 )))
             }
         }
@@ -84,13 +83,10 @@ pub async fn execute_beacon_slot_check(
     // Returns a JSON string (SlotStatus or error)
     info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
 
-    let beacon_node_url = match ENV_CONFIG.beacon_url.as_ref() {
-        Some(url) => url.as_str(),
-        None => {
-            let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
-            error!(err_msg);
-            return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
-        }
+    let beacon_node_url = if let Some(url) = ENV_CONFIG.beacon_url.as_ref() { url.as_str() } else {
+        let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
+        error!(err_msg);
+        return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
     };
 
     match serde_json::from_str::<HashMap<String, JsonValue>>(arguments_json_str) {
@@ -103,8 +99,7 @@ pub async fn execute_beacon_slot_check(
                         Err(e) => {
                             warn!(slot = slot_number, error = %e, "error fetching beacon header");
                             Ok(SlotStatus::Error(format!(
-                                "error checking slot {}: {}",
-                                slot_number, e
+                                "error checking slot {slot_number}: {e}"
                             ))
                             .to_json_string())
                         }
@@ -121,7 +116,7 @@ pub async fn execute_beacon_slot_check(
             }
         }
         Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {}", e);
+            let err_msg = format!("failed to parse arguments json: {e}");
             warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
             Ok(SlotStatus::Error(err_msg).to_json_string())
         }
@@ -166,7 +161,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let http_client = ReqwestClient::new();
 
-        let mock_path = format!("/eth/v1/beacon/headers/{}", slot_not_missed);
+        let mock_path = format!("/eth/v1/beacon/headers/{slot_not_missed}");
         let mock = server
             .mock("get", mock_path.as_str()) // mockito method matching is case-insensitive
             .with_status(200)
@@ -179,8 +174,7 @@ mod tests {
         match result {
             Ok(SlotStatus::NotMissed) => { /* test passed */ }
             _ => panic!(
-                "expected slot {} to be slotstatus::notmissed, got {:?}",
-                slot_not_missed, result
+                "expected slot {slot_not_missed} to be slotstatus::notmissed, got {result:?}"
             ),
         }
     }
@@ -192,7 +186,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let http_client = ReqwestClient::new();
 
-        let mock_path = format!("/eth/v1/beacon/headers/{}", slot_missed);
+        let mock_path = format!("/eth/v1/beacon/headers/{slot_missed}");
         let mock = server
             .mock("get", mock_path.as_str())
             .with_status(404) // 404 indicates a missed slot
@@ -205,8 +199,7 @@ mod tests {
         match result {
             Ok(SlotStatus::Missed) => { /* test passed */ }
             _ => panic!(
-                "expected slot {} to be slotstatus::missed, got {:?}",
-                slot_missed, result
+                "expected slot {slot_missed} to be slotstatus::missed, got {result:?}"
             ),
         }
     }

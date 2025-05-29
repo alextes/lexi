@@ -106,7 +106,7 @@ pub(super) async fn process_openai_response_loop(
             // this marks the assistant's turn in the history.
             conversation_history.push(InputItem::Message(InputMessageObject {
                 role: "assistant".to_string(),
-                content: "".to_string(),
+                content: String::new(),
             }));
         }
 
@@ -234,7 +234,7 @@ pub(super) async fn process_openai_response_loop(
                 Err(e) => {
                     error!(chat_id = logging_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed. cannot continue processing this interaction.");
                     return Ok((
-                        format!("a critical error occurred while trying to process tool results with the ai: {}. please try again.", e),
+                        format!("a critical error occurred while trying to process tool results with the ai: {e}. please try again."),
                         current_response_id // return the id of the last successful response before this error
                     ));
                 }

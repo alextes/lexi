@@ -10,18 +10,13 @@ use crate::telegram::types::{
 // Initialize database connection and run migrations
 pub async fn initialize_database(database_url: &str) -> Result<PgPool> {
     let options = PgConnectOptions::from_str(database_url)
-        .wrap_err_with(|| format!("failed to parse database_url: '{}'", database_url))?;
+        .wrap_err_with(|| format!("failed to parse database_url: '{database_url}'"))?;
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .connect_with(options)
         .await
-        .wrap_err_with(|| {
-            format!(
-                "failed to connect to postgresql database at {}",
-                database_url
-            )
-        })?;
+        .wrap_err_with(|| format!("failed to connect to postgresql database at {database_url}"))?;
 
     tracing::info!("running database migrations (postgresql)... ");
     sqlx::migrate!("./migrations")
@@ -183,9 +178,7 @@ pub async fn get_message_history(
     .await
     .wrap_err_with(|| {
         format!(
-            "failed to fetch message history for chat_id {} with limit {}",
-            local_chat_id,
-            limit
+            "failed to fetch message history for chat_id {local_chat_id} with limit {limit}"
         )
     })?;
 
@@ -205,10 +198,7 @@ pub async fn get_last_openai_response_id(
     .fetch_one(pool)
     .await
     .wrap_err_with(|| {
-        format!(
-            "failed to fetch last_openai_response_id for chat_id {}",
-            local_chat_id
-        )
+        format!("failed to fetch last_openai_response_id for chat_id {local_chat_id}")
     })?;
     Ok(result.last_openai_response_id)
 }
@@ -228,8 +218,7 @@ pub async fn update_last_openai_response_id(
     .await
     .wrap_err_with(|| {
         format!(
-            "failed to update last_openai_response_id for chat_id {} to {}",
-            local_chat_id, response_id
+            "failed to update last_openai_response_id for chat_id {local_chat_id} to {response_id}"
         )
     })?;
     Ok(())
@@ -244,10 +233,7 @@ pub async fn clear_last_openai_response_id(pool: &PgPool, local_chat_id: i32) ->
     .execute(pool)
     .await
     .wrap_err_with(|| {
-        format!(
-            "failed to clear last_openai_response_id for chat_id {}",
-            local_chat_id
-        )
+        format!("failed to clear last_openai_response_id for chat_id {local_chat_id}")
     })?;
     Ok(())
 }
@@ -405,7 +391,7 @@ mod tests {
 
         // insert a few messages
         for i in 0..5 {
-            let msg_text = format!("message {}", i);
+            let msg_text = format!("message {i}");
             // make sure sent_at is distinct and in order for testing
             let msg_tg = TelegramMessage {
                 message_id: 1000 + i,

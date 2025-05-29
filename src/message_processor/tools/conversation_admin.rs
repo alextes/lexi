@@ -78,55 +78,51 @@ pub async fn execute_conversation_admin_command(
             let command_name = args_map.get("command");
             let admin_code_val = args_map.get(ADMIN_CODE_PARAM_NAME);
 
-            match (command_name, admin_code_val) {
-                (Some(cmd), Some(code)) => {
-                    if cmd == RESET_CONVERSATION_COMMAND_NAME && code == &*EXPECTED_ADMIN_CODE {
-                        info!(command = %cmd, "admin command validated, proceeding with reset.");
-                        Ok(reset_conversation_impl())
-                    } else if cmd != RESET_CONVERSATION_COMMAND_NAME {
-                        let err_msg = format!(
-                            "invalid command '{}' specified. only '{}' is supported.",
-                            cmd, RESET_CONVERSATION_COMMAND_NAME
-                        );
-                        warn!(args = %arguments_json_str, error = %err_msg);
-                        Ok(json!({
-                            "status": "error",
-                            "message": err_msg
-                        })
-                        .to_string())
-                    } else {
-                        // cmd is correct, so code must be wrong
-                        let err_msg = "invalid admin_code provided.";
-                        warn!(args = %arguments_json_str, error = err_msg);
-                        Ok(json!({
-                            "status": "error",
-                            "message": err_msg
-                        })
-                        .to_string())
-                    }
-                }
-                _ => {
-                    let mut missing_params = Vec::new();
-                    if command_name.is_none() {
-                        missing_params.push("'command'".to_string());
-                    }
-                    if admin_code_val.is_none() {
-                        missing_params.push(format!("'{}'", ADMIN_CODE_PARAM_NAME));
-                    }
-                    let missing_params_str = missing_params.join(", ");
-                    let err_msg = format!("missing required argument(s): {}", missing_params_str);
+            if let (Some(cmd), Some(code)) = (command_name, admin_code_val) {
+                if cmd == RESET_CONVERSATION_COMMAND_NAME && code == &*EXPECTED_ADMIN_CODE {
+                    info!(command = %cmd, "admin command validated, proceeding with reset.");
+                    Ok(reset_conversation_impl())
+                } else if cmd != RESET_CONVERSATION_COMMAND_NAME {
+                    let err_msg = format!(
+                        "invalid command '{cmd}' specified. only '{RESET_CONVERSATION_COMMAND_NAME}' is supported."
+                    );
                     warn!(args = %arguments_json_str, error = %err_msg);
                     Ok(json!({
                         "status": "error",
-                        "message": err_msg.as_str(), // use .as_str() for the json macro
-                        "details": format!("expected json with 'command' and '{}' keys, got: {}", ADMIN_CODE_PARAM_NAME, arguments_json_str)
-                    }).to_string())
+                        "message": err_msg
+                    })
+                    .to_string())
+                } else {
+                    // cmd is correct, so code must be wrong
+                    let err_msg = "invalid admin_code provided.";
+                    warn!(args = %arguments_json_str, error = err_msg);
+                    Ok(json!({
+                        "status": "error",
+                        "message": err_msg
+                    })
+                    .to_string())
                 }
+            } else {
+                let mut missing_params = Vec::new();
+                if command_name.is_none() {
+                    missing_params.push("'command'".to_string());
+                }
+                if admin_code_val.is_none() {
+                    missing_params.push(format!("'{ADMIN_CODE_PARAM_NAME}'"));
+                }
+                let missing_params_str = missing_params.join(", ");
+                let err_msg = format!("missing required argument(s): {missing_params_str}");
+                warn!(args = %arguments_json_str, error = %err_msg);
+                Ok(json!({
+                    "status": "error",
+                    "message": err_msg.as_str(), // use .as_str() for the json macro
+                    "details": format!("expected json with 'command' and '{}' keys, got: {}", ADMIN_CODE_PARAM_NAME, arguments_json_str)
+                }).to_string())
             }
         }
         Err(e) => {
             let parse_error_message =
-                format!("failed to parse arguments json for admin command: {}", e);
+                format!("failed to parse arguments json for admin command: {e}");
             warn!(args = %arguments_json_str, error = %parse_error_message, "json parsing error");
             Ok(json!({
                 "status": "error",
