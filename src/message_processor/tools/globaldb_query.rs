@@ -1,0 +1,174 @@
+use crate::env::ENV_CONFIG;
+use crate::message_processor::HandlerContext;
+use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
+use eyre::Result;
+use serde_json::{json, Map as JsonMap, Value as JsonValue};
+use sqlx::{Column, PgPool, Row, ValueRef};
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use tracing::{error, info, warn};
+
+pub const GLOBALDB_TOOL_NAME: &str = "execute_globaldb_query";
+
+// --- tool definition ---
+pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
+    let mut params_props = HashMap::new();
+    params_props.insert(
+        "sql_query".to_string(),
+        ToolFunctionParameterProperty {
+            r#type: "string".to_string(),
+            description: Some(
+                "the sql select query to execute against the global-specific database. must start with 'select'. provide the full query."
+                    .to_string(),
+            ),
+            r#enum: None,
+        },
+    );
+    let tool_params = ToolFunctionParameters {
+        r#type: "object".to_string(),
+        properties: params_props,
+        required: Some(vec!["sql_query".to_string()]),
+        additional_properties: false,
+    };
+    ToolDefinition::new(
+        GLOBALDB_TOOL_NAME.to_string(),
+        Some(
+            "executes a sql select query against a read-only global database. provide the complete sql query. important tables and columns will be described by the assistant if known."
+                .to_string(),
+        ),
+        Some(tool_params),
+    )
+});
+
+// --- tool execution logic for globaldb ---
+async fn execute_globaldb_db_query(query: &str) -> JsonValue {
+    info!(query = %query, "(globaldb executor) attempting to execute db query");
+
+    let db_url = match &ENV_CONFIG.globaldb_database_url {
+        Some(url) => url.clone(),
+        None => {
+            warn!("(globaldb executor) GLOBALDB_DATABASE_URL not configured.");
+            return json!({
+                "status": "error",
+                "message": "globaldb query tool is not configured (missing GLOBALDB_DATABASE_URL).",
+                "details": "The GLOBALDB_DATABASE_URL environment variable must be set to use this tool."
+            });
+        }
+    };
+
+    let pool_result = PgPool::connect(&db_url).await;
+    let pool = match pool_result {
+        Ok(p) => p,
+        Err(e) => {
+            error!(error = %e, "(globaldb executor) failed to connect to globaldb");
+            return json!({
+                "status": "error",
+                "message": "failed to connect to the globaldb database.",
+                "details": e.to_string()
+            });
+        }
+    };
+
+    let trimmed_query = query.trim().to_lowercase();
+    if !trimmed_query.starts_with("select") {
+        warn!(query = %query, "(globaldb executor) rejected non-select query.");
+        return json!({
+            "status": "error",
+            "message": "invalid query type. only select queries are permitted for globaldb.",
+            "details": format!("query was: {}", query)
+        });
+    }
+
+    info!(query = %query, "(globaldb executor) executing select db query");
+    match sqlx::query(query).fetch_all(&pool).await {
+        // Use the new pool
+        Ok(rows) => {
+            if rows.is_empty() {
+                // Return a simpler message for no rows
+                return json!({
+                    "message": "globaldb query executed successfully. no rows returned."
+                });
+            }
+            let mut results: Vec<JsonMap<String, JsonValue>> = Vec::new();
+            for row in rows {
+                let mut json_row = JsonMap::new();
+                for (i, column) in row.columns().iter().enumerate() {
+                    let value = match row.try_get_raw(i) {
+                        Ok(raw_value) if !raw_value.is_null() => {
+                            if let Ok(v_str) = row.try_get::<String, _>(i) {
+                                json!(v_str)
+                            } else if let Ok(v_i64) = row.try_get::<i64, _>(i) {
+                                json!(v_i64)
+                            } else if let Ok(v_i32) = row.try_get::<i32, _>(i) {
+                                json!(v_i32)
+                            } else if let Ok(v_f64) = row.try_get::<f64, _>(i) {
+                                json!(v_f64)
+                            } else if let Ok(v_bool) = row.try_get::<bool, _>(i) {
+                                json!(v_bool)
+                            } else if let Ok(v_time) =
+                                row.try_get::<chrono::DateTime<chrono::Utc>, _>(i)
+                            {
+                                json!(v_time.to_rfc3339())
+                            } else {
+                                json!(null) // Should ideally represent as string if unknown type
+                            }
+                        }
+                        _ => json!(null),
+                    };
+                    json_row.insert(column.name().to_string(), value);
+                }
+                results.push(json_row);
+            }
+            // Return only the array of results directly for successful queries with data
+            json!(results)
+        }
+        Err(e) => {
+            error!(error = %e, query = %query, "(globaldb executor) failed to execute sql query");
+            json!({
+                "status": "error",
+                "message": "failed to execute globaldb sql query.",
+                "details": e.to_string()
+            })
+        }
+    }
+}
+
+// --- new simplified tool execution function ---
+pub async fn execute_globaldb_query_tool(
+    _ctx: &HandlerContext<'_>, // Context might be needed for future enhancements or if db pool is on ctx
+    arguments_json_str: &str,  // The arguments string from OutputFunctionCall
+) -> Result<String> {
+    // Returns a JSON string (query results or error)
+    info!(args = %arguments_json_str, "executing execute_globaldb_query tool");
+
+    match serde_json::from_str::<HashMap<String, String>>(arguments_json_str) {
+        Ok(args_map) => {
+            if let Some(sql_query_from_ai) = args_map.get("sql_query") {
+                info!(query = %sql_query_from_ai, "parsed sql_query from ai arguments");
+                let result_json_value = execute_globaldb_db_query(sql_query_from_ai).await;
+                Ok(result_json_value.to_string())
+            } else {
+                let err_msg = "argument 'sql_query' missing";
+                warn!(args = %arguments_json_str, err_msg);
+                Ok(json!({
+                    "status": "error",
+                    "message": err_msg,
+                    "details": format!("expected json with a 'sql_query' key, got: {}", arguments_json_str)
+                }).to_string())
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("failed to parse arguments json: {}", e);
+            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            Ok(json!({
+                "status": "error",
+                "message": "failed to parse tool arguments as json.",
+                "details": err_msg
+            })
+            .to_string())
+        }
+    }
+}
+
+// note: tests for globaldb_query would require a separate test database setup or mocking.
+// for now, the query execution logic is identical to execute_sql_query, which is tested.
