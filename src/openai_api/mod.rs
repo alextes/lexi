@@ -108,7 +108,9 @@ mod tests {
     async fn test_call_responses_api_with_input_parameter() {
         let _ = color_eyre::install();
 
-        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") { key } else {
+        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") {
+            key
+        } else {
             eprintln!(
                 "test_call_responses_api_with_input_parameter skipped: OPENAI_API_KEY not set."
             );
@@ -155,9 +157,7 @@ mod tests {
                         println!("assistant reply: {}", first_text_content.text);
                     }
                     OutputItem::FunctionCall(fc) => {
-                        panic!(
-                            "expected a message output, but got a function call: {fc:?}"
-                        );
+                        panic!("expected a message output, but got a function call: {fc:?}");
                     }
                 }
             }
@@ -176,7 +176,9 @@ mod tests {
     #[tokio::test]
     async fn test_call_responses_api_with_function_tool() {
         let _ = color_eyre::install();
-        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") { key } else {
+        let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") {
+            key
+        } else {
             eprintln!(
                 "test_call_responses_api_with_function_tool skipped: OPENAI_API_KEY not set."
             );
@@ -239,9 +241,7 @@ mod tests {
             initial_response_result.err()
         );
         let initial_response = initial_response_result.unwrap();
-        println!(
-            "function call test: step 1 - response: {initial_response:#?}"
-        );
+        println!("function call test: step 1 - response: {initial_response:#?}");
 
         assert!(
             !initial_response.output.is_empty(),
@@ -266,9 +266,7 @@ mod tests {
             .get("sql_query")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        println!(
-            "function call test: sql query from model: {sql_query_from_model}"
-        );
+        println!("function call test: sql query from model: {sql_query_from_model}");
 
         let mock_sql_result = serde_json::json!({
             "status": "success",
@@ -319,9 +317,7 @@ mod tests {
             final_response_result.err()
         );
         let final_response = final_response_result.unwrap();
-        println!(
-            "function call test: step 2 - final response: {final_response:#?}"
-        );
+        println!("function call test: step 2 - final response: {final_response:#?}");
 
         assert!(
             !final_response.output.is_empty(),
@@ -342,9 +338,7 @@ mod tests {
                     .contains("alpha@simpletest.com"));
             }
             OutputItem::FunctionCall(fc) => {
-                panic!(
-                    "expected a final message, but got another function call: {fc:?}"
-                );
+                panic!("expected a final message, but got another function call: {fc:?}");
             }
         }
     }

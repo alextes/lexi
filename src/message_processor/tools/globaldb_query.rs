@@ -1,8 +1,7 @@
 use crate::env::ENV_CONFIG;
 use crate::message_processor::HandlerContext;
 use crate::openai_api::{
-    ToolDefinition, ToolFunctionParameterPropertyBuilder,
-    ToolFunctionParameters,
+    ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
 use eyre::Result;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
@@ -42,7 +41,9 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 async fn execute_globaldb_db_query(query: &str) -> JsonValue {
     info!(query = %query, "(globaldb executor) attempting to execute db query");
 
-    let db_url = if let Some(url) = &ENV_CONFIG.globaldb_database_url { url.clone() } else {
+    let db_url = if let Some(url) = &ENV_CONFIG.globaldb_database_url {
+        url.clone()
+    } else {
         warn!("(globaldb executor) GLOBALDB_DATABASE_URL not configured.");
         return json!({
             "status": "error",

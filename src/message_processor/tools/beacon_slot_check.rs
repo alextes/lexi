@@ -83,7 +83,9 @@ pub async fn execute_beacon_slot_check(
     // Returns a JSON string (SlotStatus or error)
     info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
 
-    let beacon_node_url = if let Some(url) = ENV_CONFIG.beacon_url.as_ref() { url.as_str() } else {
+    let beacon_node_url = if let Some(url) = ENV_CONFIG.beacon_url.as_ref() {
+        url.as_str()
+    } else {
         let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
         error!(err_msg);
         return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
@@ -98,10 +100,12 @@ pub async fn execute_beacon_slot_check(
                         Ok(status) => Ok(status.to_json_string()),
                         Err(e) => {
                             warn!(slot = slot_number, error = %e, "error fetching beacon header");
-                            Ok(SlotStatus::Error(format!(
-                                "error checking slot {slot_number}: {e}"
-                            ))
-                            .to_json_string())
+                            Ok(
+                                SlotStatus::Error(format!(
+                                    "error checking slot {slot_number}: {e}"
+                                ))
+                                .to_json_string(),
+                            )
                         }
                     }
                 } else {
@@ -198,9 +202,7 @@ mod tests {
         mock.assert_async().await; // verify the mock was called
         match result {
             Ok(SlotStatus::Missed) => { /* test passed */ }
-            _ => panic!(
-                "expected slot {slot_missed} to be slotstatus::missed, got {result:?}"
-            ),
+            _ => panic!("expected slot {slot_missed} to be slotstatus::missed, got {result:?}"),
         }
     }
 }

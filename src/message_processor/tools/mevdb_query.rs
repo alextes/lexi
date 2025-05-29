@@ -41,7 +41,9 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 async fn execute_mevdb_db_query(query: &str) -> JsonValue {
     info!(query = %query, "(mevdb executor) attempting to execute db query");
 
-    let db_url = if let Some(url) = &ENV_CONFIG.mevdb_database_url { url.clone() } else {
+    let db_url = if let Some(url) = &ENV_CONFIG.mevdb_database_url {
+        url.clone()
+    } else {
         warn!("(mevdb executor) MEVDB_DATABASE_URL not configured.");
         return json!({
             "status": "error",

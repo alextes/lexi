@@ -54,9 +54,7 @@ pub async fn run_bot_loop(
             .send()
             .await
             .wrap_err_with(|| {
-                format!(
-                    "(bot::loop) failed to send getUpdates request to URL: {get_updates_url}"
-                )
+                format!("(bot::loop) failed to send getUpdates request to URL: {get_updates_url}")
             })?;
 
         let status = response.status();

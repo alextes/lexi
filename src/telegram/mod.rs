@@ -114,10 +114,6 @@ pub async fn get_me(
     } else {
         let error_body = response.text().await.unwrap_or_default();
         tracing::error!(status = %status, body = %error_body, "http error during getMe");
-        Err(eyre!(
-            "http error {} during getMe: {}",
-            status,
-            error_body
-        ))
+        Err(eyre!("http error {} during getMe: {}", status, error_body))
     }
 }
