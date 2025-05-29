@@ -2,7 +2,6 @@ on: push
 
 env:
   CARGO_TERM_COLOR: always
-  SQLX_OFFLINE: "true"
 
 name: check-lint-test
 
@@ -16,29 +15,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check
 
-  # check-schema:
-  #   runs-on: ubuntu-latest
-  #   continue-on-error: true
-  #   steps:
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v4
-
-  #     - run: rustup toolchain install stable --profile minimal
-
-  #     # check if this speeds anything up
-  #     - uses: Swatinem/rust-cache@v2
-
-  #     - name: Install sqlx-cli
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: install
-  #         args: sqlx-cli
-
-  #     - name: Run sqlx check
-  #       uses: actions-rs/cargo@v1
-  #       with:
-  #         command: sqlx
-  #         args: prepare --check -- --all-targets
+  check-schema:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install sqlx-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli
+      - run: cargo sqlx prepare --check -- --all-targets
 
   lint:
     strategy:
@@ -56,7 +45,23 @@ jobs:
     strategy:
       fail-fast: false
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -- --nocapture
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
