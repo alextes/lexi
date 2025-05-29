@@ -86,7 +86,7 @@ pub fn log_other_mentions(message: &TelegramMessage) {
                             |u| u.username.clone().unwrap_or_else(|| u.first_name.clone())
                         ),
                         mention = mention_text,
-                        "(bot) received other mention (not bot)" // updated log prefix
+                        "received other mention (not bot)"
                     );
                 }
             }
@@ -95,7 +95,7 @@ pub fn log_other_mentions(message: &TelegramMessage) {
 }
 
 pub async fn send_reply_and_update_state(
-    ctx: &BotContext<'_>, // Updated to use BotContext
+    ctx: &BotContext<'_>,
     telegram_chat_id: i64,
     local_chat_id_for_db: i32,
     reply_text: &str,
@@ -103,8 +103,8 @@ pub async fn send_reply_and_update_state(
 ) -> Result<()> {
     info!(
         chat_id = telegram_chat_id,
-        "(bot) sending final reply: '{}'",
-        reply_text[..32].to_string()
+        "sending final reply: '{}'",
+        reply_text.chars().take(32).collect::<String>()
     );
     let sent_bot_message = telegram::send_message(
         ctx.http_client,
@@ -114,10 +114,10 @@ pub async fn send_reply_and_update_state(
         reply_text,
     )
     .await
-    .wrap_err_with(|| format!("(bot) failed to send final reply to chat_id {telegram_chat_id}"))?;
+    .wrap_err_with(|| format!("failed to send final reply to chat_id {telegram_chat_id}"))?;
 
     let bot_reply_raw_json = serde_json_to_string(&sent_bot_message)
-        .context("(bot) failed to serialize bot reply message to json")?;
+        .context("failed to serialize bot reply message to json")?;
     db::insert_message(
         ctx.pool,
         &sent_bot_message,
@@ -128,14 +128,14 @@ pub async fn send_reply_and_update_state(
     .await
     .wrap_err_with(|| {
         format!(
-            "(bot) failed to insert bot final reply (id: {}) into database", // updated log prefix
+            "failed to insert bot final reply (id: {}) into database",
             sent_bot_message.message_id
         )
     })?;
     info!(
         chat_id = telegram_chat_id,
         sent_message_id = sent_bot_message.message_id,
-        "(bot) saved bot final reply to db" // updated log prefix
+        "saved bot final reply to db"
     );
 
     match response_id_to_store {
@@ -144,30 +144,25 @@ pub async fn send_reply_and_update_state(
                 db::update_last_openai_response_id(ctx.pool, local_chat_id_for_db, id_to_store)
                     .await
             {
-                warn!(chat_id = telegram_chat_id, response_id = id_to_store, error = %e, "(bot) failed to update last_openai_response_id for chat.");
-                // updated log prefix
+                warn!(chat_id = telegram_chat_id, response_id = id_to_store, error = %e, "failed to update last_openai_response_id for chat.");
             }
         }
         _ => {
             warn!(
                 chat_id = telegram_chat_id,
-                "(bot) no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for chat." // updated log prefix
+                "no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for chat."
             );
             if let Err(e) = db::clear_last_openai_response_id(ctx.pool, local_chat_id_for_db).await
             {
-                error!(chat_id = telegram_chat_id, error = %e, "(bot) failed to clear last_openai_response_id for chat after an issue.");
-                // updated log prefix
+                error!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id for chat after an issue.");
             }
         }
     }
     Ok(())
 }
 
-pub async fn handle_telegram_update(
-    ctx: &BotContext<'_>, // Updated to use BotContext
-    update: &TelegramUpdate,
-) -> Result<()> {
-    debug!(?update, "(bot) processing update"); // updated log prefix
+pub async fn handle_telegram_update(ctx: &BotContext<'_>, update: &TelegramUpdate) -> Result<()> {
+    debug!(?update, "processing update");
 
     if let Some(incoming_message) = &update.message {
         let sender_data = if let Some(user) = &incoming_message.from {
@@ -176,7 +171,7 @@ pub async fn handle_telegram_update(
             warn!(
                 message_id = incoming_message.message_id,
                 chat_id = incoming_message.chat.id,
-                "(bot) message has no sender (e.g., channel post), skipping." // updated log prefix
+                "message has no sender (e.g., channel post), skipping."
             );
             log_other_mentions(incoming_message);
             return Ok(());
@@ -184,26 +179,16 @@ pub async fn handle_telegram_update(
 
         let local_user_id = db::upsert_user(ctx.pool, sender_data)
             .await
-            .wrap_err_with(|| {
-                format!(
-                    "(bot) upserting user (telegram_id: {}) failed", // updated log prefix
-                    sender_data.id
-                )
-            })?;
+            .wrap_err_with(|| format!("upserting user (telegram_id: {}) failed", sender_data.id))?;
 
         let chat_data = &incoming_message.chat;
         let local_chat_id_for_conversation = db::upsert_chat(ctx.pool, chat_data)
             .await
-            .wrap_err_with(|| {
-                format!(
-                    "(bot) upserting chat (telegram_id: {}) failed", // updated log prefix
-                    chat_data.id
-                )
-            })?;
+            .wrap_err_with(|| format!("upserting chat (telegram_id: {}) failed", chat_data.id))?;
 
         let raw_message_json = serde_json_to_string(incoming_message).wrap_err_with(|| {
             format!(
-                "(bot) serializing message (id: {}) to json failed", // updated log prefix
+                "serializing message (id: {}) to json failed",
                 incoming_message.message_id
             )
         })?;
@@ -218,7 +203,7 @@ pub async fn handle_telegram_update(
         .await
         .wrap_err_with(|| {
             format!(
-                "(bot) inserting incoming message (id: {}) failed", // updated log prefix
+                "inserting incoming message (id: {}) failed",
                 incoming_message.message_id
             )
         })?;
@@ -227,7 +212,7 @@ pub async fn handle_telegram_update(
             telegram_message_id = incoming_message.message_id,
             local_db_user_id = local_user_id,
             local_db_chat_id = local_chat_id_for_conversation,
-            "(bot) successfully inserted incoming message" // updated log prefix
+            "successfully inserted incoming message"
         );
 
         let should_trigger_ai_reply = incoming_message.chat.chat_type == "private"
@@ -246,7 +231,7 @@ pub async fn handle_telegram_update(
             if prompt_text.is_empty() && incoming_message.text.is_some() {
                 info!(
                     chat_id = incoming_message.chat.id,
-                    "(bot) prompt is empty after processing, sending generic acknowledgement." // updated log prefix
+                    "prompt is empty after processing, sending generic acknowledgement."
                 );
                 let acknowledgement = format!("hi {}! you {} me, but your message seemed empty after processing. what can i help you with?",
                     incoming_message.from.as_ref().map_or("there", |u| &u.first_name),
@@ -260,19 +245,20 @@ pub async fn handle_telegram_update(
                     None,
                 )
                 .await
-                .wrap_err("(bot) failed to send/store acknowledgement for empty prompt")?;
-            // updated log prefix
+                .wrap_err("failed to send/store acknowledgement for empty prompt")?;
             } else if !prompt_text.is_empty() {
-                let previous_response_id_opt_string =
-                    match db::get_last_openai_response_id(ctx.pool, local_chat_id_for_conversation)
-                        .await
-                    {
-                        Ok(id_opt) => id_opt,
-                        Err(e) => {
-                            warn!(chat_id = incoming_message.chat.id, error = %e, "(bot) failed to fetch last_openai_response_id, proceeding without it."); // updated log prefix
-                            None
-                        }
-                    };
+                let previous_response_id_opt_string = match db::get_last_openai_response_id(
+                    ctx.pool,
+                    local_chat_id_for_conversation,
+                )
+                .await
+                {
+                    Ok(id_opt) => id_opt,
+                    Err(e) => {
+                        warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
+                        None
+                    }
+                };
 
                 let mp_ctx = message_processor::HandlerContext {
                     pool: ctx.pool,
@@ -289,18 +275,49 @@ pub async fn handle_telegram_update(
                 )
                 .await
                 {
-                    Ok((final_text, response_id_to_store)) => {
-                        send_reply_and_update_state(
-                            ctx,
-                            incoming_message.chat.id,
-                            local_chat_id_for_conversation,
-                            &final_text,
-                            Some(&response_id_to_store),
-                        )
-                        .await?;
-                    }
+                    Ok(ai_outcome) => match ai_outcome {
+                        message_processor::AiConversationOutcome::TextMessage(
+                            final_text,
+                            response_id_to_store,
+                        ) => {
+                            send_reply_and_update_state(
+                                ctx,
+                                incoming_message.chat.id,
+                                local_chat_id_for_conversation,
+                                &final_text,
+                                Some(&response_id_to_store),
+                            )
+                            .await?;
+                        }
+                        message_processor::AiConversationOutcome::ResetConversation(
+                            confirmation_message,
+                            _response_id,
+                        ) => {
+                            telegram::send_message(
+                                ctx.http_client,
+                                ctx.api_base_url,
+                                ctx.bot_token,
+                                incoming_message.chat.id,
+                                &confirmation_message,
+                            )
+                            .await
+                            .wrap_err("failed to send conversation reset confirmation message")?;
+                            if let Err(e) = db::clear_last_openai_response_id(
+                                ctx.pool,
+                                local_chat_id_for_conversation,
+                            )
+                            .await
+                            {
+                                error!(chat_id = incoming_message.chat.id, error = %e, "failed to clear last_openai_response_id for chat after reset command.");
+                            }
+                            info!(
+                                chat_id = incoming_message.chat.id,
+                                "conversation reset for chat."
+                            );
+                        }
+                    },
                     Err(e) => {
-                        error!(chat_id = incoming_message.chat.id, error = %e, "(bot) error from drive_ai_conversation"); // updated log prefix
+                        error!(chat_id = incoming_message.chat.id, error = %e, "error from drive_ai_conversation");
                         let fallback_text =
                             format!("sorry, an error occurred while generating the ai reply: {e}");
                         let _ = send_reply_and_update_state(
@@ -312,7 +329,7 @@ pub async fn handle_telegram_update(
                         )
                         .await
                         .map_err(|send_err| {
-                            error!(chat_id = incoming_message.chat.id, error = %send_err, "(bot) failed to send even the error fallback message after content gen failure."); // updated log prefix
+                            error!(chat_id = incoming_message.chat.id, error = %send_err, "failed to send even the error fallback message after content gen failure.");
                         });
                         return Err(e);
                     }
@@ -320,12 +337,14 @@ pub async fn handle_telegram_update(
             } else {
                 debug!(
                     chat_id = incoming_message.chat.id,
-                    "(bot) message text is empty, not an error, just no text to process for ai reply." // updated log prefix
+                    "message text is empty, not an error, just no text to process for ai reply."
                 );
             }
         } else {
             log_other_mentions(incoming_message);
         }
+    } else {
+        debug!("received update without a message (e.g., edited message, callback query), skipping direct reply logic.");
     }
     Ok(())
 }

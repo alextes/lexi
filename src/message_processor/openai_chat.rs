@@ -6,12 +6,13 @@
 //! this allows it to be used by different entry points, such as the main telegram bot loop
 //! or a command-line interface for testing.
 
+use super::AiConversationOutcome;
 use crate::openai_api::{
-    call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
+    self, call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
     OpenAiApiResponse, OutputFunctionCall, OutputItem, ToolDefinition,
 };
 use eyre::Result;
-use futures::future::join_all;
+use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, warn};
 
 pub const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1";
@@ -46,64 +47,105 @@ fn summarize_conversation_history(history: &[InputItem]) -> Vec<String> {
             InputItem::Message(msg) => match msg.role.as_str() {
                 "user" => "user_message".to_string(),
                 "assistant" => "assistant_message".to_string(),
-                "tool" => "tool_message_generic".to_string(), // Should ideally not happen with current logic
+                "tool" => "tool_message_generic".to_string(),
                 _ => format!("message_role_{}", msg.role),
             },
             InputItem::FunctionCallOutput(_) => "tool_call_output".to_string(),
-            InputItem::FunctionCallEcho(_) => "tool_call_echo".to_string(), // Should not happen with current logic
-            InputItem::Text(_) => "text_input_item".to_string(), // Should not happen with current logic
+            InputItem::FunctionCallEcho(_) => "tool_call_echo".to_string(),
+            InputItem::Text(_) => "text_input_item".to_string(),
         })
         .collect()
+}
+
+/// parses the output items from an openai api response.
+fn parse_api_response_output(
+    output_items: Vec<OutputItem>,
+) -> (Vec<OutputFunctionCall>, Option<String>) {
+    let mut function_calls_to_execute: Vec<OutputFunctionCall> = Vec::new();
+    let mut assistant_text_content_this_turn: Option<String> = None;
+
+    for output_item in output_items {
+        match output_item {
+            OutputItem::FunctionCall(fc) => {
+                function_calls_to_execute.push(fc);
+            }
+            OutputItem::Message(msg) => {
+                if msg.role == "assistant" {
+                    if let Some(text_content) = msg.content.first() {
+                        if text_content.r#type == "output_text" {
+                            let text = text_content.text.clone();
+                            // If there are multiple assistant messages, concatenate them.
+                            // Typically, there's one, or text followed by tool calls.
+                            assistant_text_content_this_turn = Some(
+                                assistant_text_content_this_turn
+                                    .map_or(text.clone(), |prev| prev + "\n" + &text),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (function_calls_to_execute, assistant_text_content_this_turn)
+}
+
+/// executes a single tool function call based on its name.
+async fn execute_tool_call(
+    ctx: &super::HandlerContext<'_>,
+    fc_request: &OutputFunctionCall,
+    logging_chat_id: i64, // Kept for specific tool logging if any tool still uses it internally, though most were removed
+) -> Result<String> {
+    use super::tools::*;
+
+    let tool_name = &fc_request.name;
+    let arguments = &fc_request.arguments;
+
+    if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
+        beacon_slot_check::execute_beacon_slot_check(ctx, arguments).await
+    } else if tool_name == database_schema::DATABASE_SCHEMA_TOOL_NAME {
+        database_schema::execute_get_database_schema(ctx, arguments).await
+    } else if tool_name == mevdb_query::MEVDB_TOOL_NAME {
+        mevdb_query::execute_mevdb_query_tool(ctx, arguments).await
+    } else if tool_name == globaldb_query::GLOBALDB_TOOL_NAME {
+        globaldb_query::execute_globaldb_query_tool(ctx, arguments).await
+    } else if tool_name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
+        conversation_admin::execute_conversation_admin_command(ctx, arguments).await
+    } else {
+        warn!(
+            chat_id = logging_chat_id,
+            tool_name = tool_name,
+            "received unexpected tool name for execution"
+        );
+        Ok(format!(
+            "{{\"error\": \"unexpected_tool_name\", \"tool_name\": \"{}\"}}",
+            tool_name
+        ))
+    }
 }
 
 // processes the response from the openai api, handling direct messages or dispatching to tool handlers.
 // this is the core loop that handles sequences of api calls if tools are involved.
 pub(super) async fn process_openai_response_loop(
     ctx: &super::HandlerContext<'_>,
-    logging_chat_id: i64, // keep this for context specific logging if needed, or rename/remove if truly generic
+    logging_chat_id: i64,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
-    available_tools: Vec<ToolDefinition>, // pass directly, from OPENAI_CALL_CONFIG
-    system_instructions: &str,            // pass directly, from OPENAI_CALL_CONFIG
-) -> Result<(String, String)> {
-    let mut first_iteration = true; // true for the first pass through this loop with the given api_response
+    available_tools: Vec<ToolDefinition>,
+    system_instructions: &str,
+) -> Result<AiConversationOutcome> {
+    let mut first_iteration = true;
     loop {
         let current_response_id = api_response.id.clone();
-        let mut function_calls_to_execute: Vec<OutputFunctionCall> = Vec::new();
-        let mut assistant_messages_in_current_turn: Vec<String> = Vec::new();
-        let mut assistant_text_content_this_turn: Option<String> = None;
+        let (function_calls_to_execute, assistant_text_content_this_turn) =
+            parse_api_response_output(std::mem::take(&mut api_response.output));
 
-        let output_items = std::mem::take(&mut api_response.output);
-
-        for output_item in output_items {
-            match output_item {
-                OutputItem::FunctionCall(fc) => {
-                    function_calls_to_execute.push(fc);
-                }
-                OutputItem::Message(msg) => {
-                    if msg.role == "assistant" {
-                        if let Some(text_content) = msg.content.first() {
-                            if text_content.r#type == "output_text" {
-                                let text = text_content.text.clone();
-                                assistant_messages_in_current_turn.push(text.clone());
-                                assistant_text_content_this_turn = Some(text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // add assistant's message from this turn to history.
-        // if tool calls were also made, this message is the one that led to them.
-        if let Some(text) = assistant_text_content_this_turn {
+        if let Some(text) = &assistant_text_content_this_turn {
             conversation_history.push(InputItem::Message(InputMessageObject {
                 role: "assistant".to_string(),
-                content: text,
+                content: text.clone(), // Clone here as it's also used for final output
             }));
         } else if !function_calls_to_execute.is_empty() {
             // if there are tool calls but no assistant text, add an empty assistant message.
-            // this marks the assistant's turn in the history.
             conversation_history.push(InputItem::Message(InputMessageObject {
                 role: "assistant".to_string(),
                 content: String::new(),
@@ -111,181 +153,135 @@ pub(super) async fn process_openai_response_loop(
         }
 
         if !function_calls_to_execute.is_empty() {
-            let num_fc_this_turn = function_calls_to_execute.len();
             info!(
-                chat_id = logging_chat_id, // keep using logging_chat_id for this specific log
+                chat_id = logging_chat_id,
                 response_id = %current_response_id,
-                num_function_calls = num_fc_this_turn,
-                "processing response with {} function call(s).", num_fc_this_turn
+                num_function_calls = function_calls_to_execute.len(),
+                "processing response with {} function call(s).", function_calls_to_execute.len()
             );
 
-            let tool_execution_futures: Vec<_> = function_calls_to_execute.iter().map(async |fc_request| {
-                    let tool_output_result = if fc_request.name
-                        == super::tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME
-                    {
-                        super::tools::beacon_slot_check::execute_beacon_slot_check(
-                            ctx,
-                            &fc_request.arguments,
-                        )
-                        .await
-                    } else if fc_request.name == super::tools::mevdb_query::MEVDB_TOOL_NAME {
-                        super::tools::mevdb_query::execute_mevdb_query_tool(
-                            ctx,
-                            &fc_request.arguments,
-                        )
-                        .await
-                    } else if fc_request.name == super::tools::database_schema::DATABASE_SCHEMA_TOOL_NAME {
-                        super::tools::database_schema::execute_get_database_schema(
-                            ctx,
-                            &fc_request.arguments,
-                        )
-                        .await
-                    } else if fc_request.name == super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
-                        super::tools::conversation_admin::execute_conversation_admin_command(
-                            ctx,
-                            &fc_request.arguments,
-                        )
-                        .await
-                    } else if fc_request.name == super::tools::globaldb_query::GLOBALDB_TOOL_NAME {
-                        super::tools::globaldb_query::execute_globaldb_query_tool(
-                            ctx,
-                            &fc_request.arguments,
-                        )
-                        .await
-                    } else {
-                        warn!(
-                            chat_id = logging_chat_id, // keep using logging_chat_id
-                            function_call = ?fc_request,
-                            "openai_chat module received unexpected function call name during parallel execution planning"
-                        );
-                        Ok(format!(
-                            "{{\"error\": \"unexpected_tool_name\", \"tool_name\": \"{}\"}}",
-                            fc_request.name
-                        ))
-                    };
-                    (fc_request, tool_output_result)
-            }).collect();
-            let execution_results = join_all(tool_execution_futures).await;
-
-            let mut any_tool_execution_failed = false;
-
-            for (original_fc, result_from_tool_handler) in execution_results {
-                let tool_output_json_string = match result_from_tool_handler {
-                    Ok(output_str) => output_str,
-                    Err(e) => {
-                        any_tool_execution_failed = true;
-                        error!(chat_id = logging_chat_id, tool_name = %original_fc.name, error = %e, "tool execution failed");
-                        format!(
-                            "{{\"error\": \"tool_execution_failed\", \"tool_name\": \"{}\", \"details\": \"{}\"}}",
-                            original_fc.name,
-                            e.to_string().replace('"',"\\\"") // ensure json string is valid
-                        )
+            for fc_request in function_calls_to_execute {
+                match execute_tool_call(ctx, &fc_request, logging_chat_id).await {
+                    Ok(tool_output_json_string) => {
+                        if fc_request.name
+                            == super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                        {
+                            if let Ok(json_val) =
+                                serde_json::from_str::<JsonValue>(&tool_output_json_string)
+                            {
+                                if json_val.get("action").and_then(|v| v.as_str())
+                                    == Some("reset_conversation")
+                                {
+                                    info!(chat_id = logging_chat_id, response_id = %current_response_id, "conversation reset triggered by admin tool.");
+                                    return Ok(AiConversationOutcome::ResetConversation(
+                                        tool_output_json_string,
+                                        current_response_id,
+                                    ));
+                                }
+                            }
+                        }
+                        conversation_history.push(InputItem::FunctionCallOutput(
+                            openai_api::FunctionCallOutputItem {
+                                r#type: "function_call_output".to_string(),
+                                call_id: fc_request.call_id.clone(),
+                                output: tool_output_json_string,
+                            },
+                        ));
                     }
-                };
-
-                // add tool result to conversation history using FunctionCallOutput
-                conversation_history.push(InputItem::FunctionCallOutput(
-                    crate::openai_api::FunctionCallOutputItem {
-                        r#type: "function_call_output".to_string(), // As defined in your types
-                        call_id: original_fc.call_id.clone(),       // From the OutputFunctionCall
-                        output: tool_output_json_string,
-                    },
-                ));
-            }
-
-            if any_tool_execution_failed {
-                warn!(chat_id = logging_chat_id, "one or more tool executions failed. results (including errors) will be sent to openai.");
+                    Err(e) => {
+                        error!(chat_id = logging_chat_id, tool_name = %fc_request.name, error = %e, "tool execution failed");
+                        let error_output = format!(
+                            "{{\"error\": \"tool_execution_failed\", \"tool_name\": \"{}\", \"details\": \"{}\"}}",
+                            fc_request.name,
+                            e.to_string().replace('"',"\\\"")
+                        );
+                        conversation_history.push(InputItem::FunctionCallOutput(
+                            openai_api::FunctionCallOutputItem {
+                                r#type: "function_call_output".to_string(),
+                                call_id: fc_request.call_id.clone(),
+                                output: error_output,
+                            },
+                        ));
+                    }
+                }
             }
 
             // now, call the api again with the accumulated history including tool results.
             debug!(
-                chat_id = logging_chat_id, // keep logging_chat_id
+                chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 history_summary = ?summarize_conversation_history(&conversation_history),
                 "sending updated conversation history to api (after tool results)"
             );
             let next_api_args = CallResponsesApiOptionalArgs {
                 model_id: OPENAI_RESPONSES_MODEL_ID,
-                previous_response_id: Some(&current_response_id), // use id of response that requested tools
+                previous_response_id: Some(&current_response_id),
                 tools: Some(available_tools.clone()),
-                tool_choice: None, // let the model decide next action (respond or call more tools)
+                tool_choice: None,
                 instructions: if first_iteration {
                     Some(system_instructions)
                 } else {
                     None
                 },
                 temperature: None,
-                store: Some(true), // continue storing context on the backend if supported
+                store: Some(true),
             };
-            first_iteration = false; // Subsequent iterations will not send instructions
+            first_iteration = false;
 
-            match call_responses_api(
+            match openai_api::call_responses_api(
                 ctx.http_client,
                 ctx.openai_api_key,
-                conversation_history.clone(), // pass the full updated history
+                conversation_history.clone(),
                 next_api_args,
             )
             .await
             {
                 Ok(next_api_response) => {
-                    api_response = next_api_response; // continue loop with new response
-                                                      // conversation_history is already updated for the next iteration
+                    api_response = next_api_response;
                 }
                 Err(e) => {
-                    error!(chat_id = logging_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed. cannot continue processing this interaction.");
-                    return Ok((
-                        format!("a critical error occurred while trying to process tool results with the ai: {e}. please try again."),
-                        current_response_id // return the id of the last successful response before this error
-                    ));
+                    error!(chat_id = logging_chat_id, response_id = %current_response_id, error= %e, "api call after tool results failed.");
+                    return Err(eyre::eyre!("api call after tool results failed: {}", e));
                 }
             }
-        } else if !assistant_messages_in_current_turn.is_empty() {
-            // no function calls, and we have assistant message(s) -> this is the final response for this turn.
-            let final_text = assistant_messages_in_current_turn.join("\n"); // join if multiple message bubbles, though typically one.
-            info!(
-                chat_id = logging_chat_id, response_id = %current_response_id,
-                "received final assistant message"
-            );
+        } else if let Some(final_text) = assistant_text_content_this_turn {
+            // Use the text we parsed earlier if it exists and no tool calls were made.
+            info!(chat_id = logging_chat_id, response_id = %current_response_id, "received final assistant message");
             debug!(
                 chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 final_history_summary = ?summarize_conversation_history(&conversation_history),
                 "final conversation history state"
             );
-            return Ok((final_text, current_response_id));
+            return Ok(AiConversationOutcome::TextMessage(
+                final_text,
+                current_response_id,
+            ));
         } else {
-            // no function calls and no assistant messages this turn.
-            warn!(
-                chat_id = logging_chat_id, response_id = %current_response_id,
-                "openai api response output was empty or contained no actionable items (no text, no tools)."
-            );
+            warn!(chat_id = logging_chat_id, response_id = %current_response_id, "openai api response output was empty or contained no actionable items.");
             debug!(
                 chat_id = logging_chat_id,
                 response_id = %current_response_id,
                 empty_turn_history_summary = ?summarize_conversation_history(&conversation_history),
                 "conversation history state on empty/unhandled turn"
             );
-            return Ok((
-                "i received an empty or unhandled response from the ai.".to_string(),
+            return Ok(AiConversationOutcome::TextMessage(
+                String::new(),
                 current_response_id,
             ));
         }
     }
 }
 
-// old generate_ai_reply_content, to be mostly inlined into message_processor::drive_ai_conversation
-// its core responsibility was the first api call and then handing off to process_openai_response_loop.
-// we will rename it for now, then its body will be moved.
 pub async fn start_ai_processing_loop(
     ctx: &super::HandlerContext<'_>,
-    logging_chat_id: i64, // keep this, as it's used by process_openai_response_loop
-    initial_api_response: OpenAiApiResponse, // This will be the response from the first call made by drive_ai_conversation
-    initial_input_items: Vec<InputItem>,     // The input items that led to initial_api_response
-) -> Result<(String, String)> {
-    // now pass to the loop for potential tool use and further calls
+    logging_chat_id: i64,
+    initial_api_response: OpenAiApiResponse,
+    initial_input_items: Vec<InputItem>,
+) -> Result<AiConversationOutcome> {
     process_openai_response_loop(
         ctx,
-        logging_chat_id, // pass this through
+        logging_chat_id,
         initial_api_response,
         initial_input_items,
         OPENAI_CALL_CONFIG.available_tools.clone(),

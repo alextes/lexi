@@ -17,6 +17,16 @@ use openai_chat::{OPENAI_CALL_CONFIG, OPENAI_RESPONSES_MODEL_ID};
 pub mod openai_chat;
 pub mod tools;
 
+/// represents the outcome of an ai conversation cycle.
+pub enum AiConversationOutcome {
+    /// the ai returned a text message.
+    /// contains (message_content, response_id).
+    TextMessage(String, String),
+    /// the ai (or a tool called by the ai) requested the conversation to be reset.
+    /// contains (confirmation_message_for_user, response_id_triggering_reset).
+    ResetConversation(String, String),
+}
+
 #[derive(Clone)]
 pub struct HandlerContext<'a> {
     pub pool: &'a PgPool,
@@ -30,12 +40,12 @@ pub async fn drive_ai_conversation(
     prompt_text: &str,
     logging_chat_id: i64, // This is used for logging within openai_chat and its tools
     previous_response_id: Option<&str>,
-) -> Result<(String, String)> {
+) -> Result<AiConversationOutcome> {
     info!(
         logging_id = logging_chat_id, // Changed from chat_id to logging_id for clarity
         prompt = prompt_text,
         has_previous_id = previous_response_id.is_some(),
-        "(core ai) driving conversation for prompt: '{}'",
+        "driving conversation for prompt: '{}'",
         prompt_text
     );
 
@@ -68,7 +78,7 @@ pub async fn drive_ai_conversation(
                 .wrap_err("core ai conversation processing loop failed")
         }
         Err(e) => {
-            error!(logging_id = logging_chat_id, error = %e, "(core_ai) initial /v1/responses api call failed"); // Changed from chat_id
+            error!(logging_id = logging_chat_id, error = %e, "initial /v1/responses api call failed"); // Changed from chat_id
             Err(e)
         }
     }
@@ -77,12 +87,30 @@ pub async fn drive_ai_conversation(
 pub async fn process_single_prompt_for_cli(
     ctx: &HandlerContext<'_>,
     prompt_text: &str,
-    logging_chat_id: i64, // Renamed from telegram_chat_id as it's used as logging_chat_id
+    telegram_chat_id: i64, // Used as logging_chat_id
 ) -> Result<(String, String)> {
+    // Return type remains (String, String) for CLI simplicity
     info!(
-        logging_id = logging_chat_id, // Changed from chat_id
+        logging_id = telegram_chat_id,
         prompt = prompt_text,
-        "(cli_wrapper) processing single prompt via core ai driver"
+        "processing single prompt via core ai driver"
     );
-    drive_ai_conversation(ctx, prompt_text, logging_chat_id, None).await
+    match drive_ai_conversation(ctx, prompt_text, telegram_chat_id, None).await {
+        Ok(outcome) => match outcome {
+            AiConversationOutcome::TextMessage(message, response_id) => Ok((message, response_id)),
+            AiConversationOutcome::ResetConversation(message, response_id) => {
+                // For CLI, a reset doesn't mean much, so we'll just return the message and original ID.
+                // The user can be informed that a reset was requested.
+                info!(logging_id = telegram_chat_id, response_id = %response_id, "conversation reset was requested by ai/tool.");
+                Ok((
+                    format!(
+                        "(conversation reset requested by ai/tool, message: \"{}\")",
+                        message
+                    ),
+                    response_id,
+                ))
+            }
+        },
+        Err(e) => Err(e),
+    }
 }
