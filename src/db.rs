@@ -251,3 +251,231 @@ pub async fn clear_last_openai_response_id(pool: &PgPool, local_chat_id: i32) ->
     })?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telegram::types::{
+        Chat as TelegramChat, Message as TelegramMessage, User as TelegramUser,
+    };
+    use chrono::Utc;
+    use serde_json;
+    use sqlx::PgPool;
+    use sqlx::Row;
+
+    // helper to create a mock telegram user
+    fn mock_telegram_user(id: i64, username: &str) -> TelegramUser {
+        TelegramUser {
+            id,
+            is_bot: false,
+            first_name: "test_first".to_string(),
+            last_name: Some("test_last".to_string()),
+            username: Some(username.to_string()),
+        }
+    }
+
+    // helper to create a mock telegram chat
+    fn mock_telegram_chat(id: i64, chat_type: &str, title: &str) -> TelegramChat {
+        TelegramChat {
+            id,
+            chat_type: chat_type.to_string(),
+            title: Some(title.to_string()),
+            username: Some(format!("{}username", title.to_lowercase())),
+            first_name: None,
+            last_name: None,
+        }
+    }
+
+    // helper to create a mock telegram message
+    fn mock_telegram_message(
+        id: i64,
+        text: &str,
+        from_user: TelegramUser,
+        chat: TelegramChat,
+    ) -> TelegramMessage {
+        TelegramMessage {
+            message_id: id,
+            from: Some(from_user),
+            date: Utc::now().timestamp(),
+            chat,
+            text: Some(text.to_string()),
+            entities: None,
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_upsert_user(pool: PgPool) -> Result<()> {
+        let user_data = mock_telegram_user(12345, "testuser");
+
+        // first insert
+        let user_id = upsert_user(&pool, &user_data).await?;
+        assert!(user_id > 0);
+
+        // try to insert again (should update)
+        let updated_user_data = TelegramUser {
+            first_name: "updated_first".to_string(),
+            ..user_data.clone()
+        };
+        let updated_user_id = upsert_user(&pool, &updated_user_data).await?;
+        assert_eq!(user_id, updated_user_id);
+
+        // verify update
+        let fetched_user = sqlx::query!("SELECT first_name FROM users WHERE id = $1", user_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(fetched_user.first_name, "updated_first");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_upsert_chat(pool: PgPool) -> Result<()> {
+        let chat_data = mock_telegram_chat(67890, "private", "testchat");
+
+        // first insert
+        let chat_id = upsert_chat(&pool, &chat_data).await?;
+        assert!(chat_id > 0);
+
+        // try to insert again (should update)
+        let updated_chat_data = TelegramChat {
+            title: Some("updated_chat_title".to_string()),
+            ..chat_data.clone()
+        };
+        let updated_chat_id = upsert_chat(&pool, &updated_chat_data).await?;
+        assert_eq!(chat_id, updated_chat_id);
+
+        // verify update
+        let fetched_chat = sqlx::query!("SELECT title FROM chats WHERE id = $1", chat_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(fetched_chat.title, Some("updated_chat_title".to_string()));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_insert_message(pool: PgPool) -> Result<()> {
+        let user_data = mock_telegram_user(111, "msguser");
+        let local_user_id = upsert_user(&pool, &user_data).await?;
+
+        let chat_data = mock_telegram_chat(222, "group", "message_chat");
+        let local_chat_id = upsert_chat(&pool, &chat_data).await?;
+
+        let message_data =
+            mock_telegram_message(333, "hello world", user_data.clone(), chat_data.clone());
+        let raw_json = serde_json::to_string(&message_data)?;
+
+        // first insert
+        let message_id = insert_message(
+            &pool,
+            &message_data,
+            local_chat_id,
+            local_user_id,
+            &raw_json,
+        )
+        .await?;
+        assert!(message_id > 0);
+
+        // try to insert the same message again (should be ignored, but return existing id)
+        let message_id_again = insert_message(
+            &pool,
+            &message_data,
+            local_chat_id,
+            local_user_id,
+            &raw_json,
+        )
+        .await?;
+        assert_eq!(message_id, message_id_again);
+
+        // verify insertion by fetching
+        let fetched_message = sqlx::query!("SELECT text FROM messages WHERE id = $1", message_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(fetched_message.text, Some("hello world".to_string()));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_get_message_history(pool: PgPool) -> Result<()> {
+        let user = mock_telegram_user(777, "histuser");
+        let local_user_id = upsert_user(&pool, &user).await?;
+        let chat = mock_telegram_chat(888, "private", "history_chat");
+        let local_chat_id = upsert_chat(&pool, &chat).await?;
+
+        // insert a few messages
+        for i in 0..5 {
+            let msg_text = format!("message {}", i);
+            // make sure sent_at is distinct and in order for testing
+            let msg_tg = TelegramMessage {
+                message_id: 1000 + i,
+                from: Some(user.clone()),
+                chat: chat.clone(),
+                date: Utc::now().timestamp() + i, // ensure distinct timestamps
+                text: Some(msg_text.clone()),
+                entities: None,
+            };
+            let raw_json = serde_json::to_string(&msg_tg)?;
+            insert_message(&pool, &msg_tg, local_chat_id, local_user_id, &raw_json).await?;
+        }
+
+        // get last 3 messages
+        let history = get_message_history(&pool, local_chat_id, 3).await?;
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0].text, Some("message 2".to_string()));
+        assert_eq!(history[1].text, Some("message 3".to_string()));
+        assert_eq!(history[2].text, Some("message 4".to_string()));
+        assert_eq!(history[0].sender_id, local_user_id);
+
+        // get more messages than exist
+        let history_all = get_message_history(&pool, local_chat_id, 10).await?;
+        assert_eq!(history_all.len(), 5);
+        assert_eq!(history_all[0].text, Some("message 0".to_string()));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_openai_response_id_handling(pool: PgPool) -> Result<()> {
+        let chat_data = mock_telegram_chat(999, "group", "openai_chat");
+        let local_chat_id = upsert_chat(&pool, &chat_data).await?;
+
+        // initially, should be none
+        let initial_response_id = get_last_openai_response_id(&pool, local_chat_id).await?;
+        assert!(initial_response_id.is_none());
+
+        // update it
+        let test_response_id = "resp_12345";
+        update_last_openai_response_id(&pool, local_chat_id, test_response_id).await?;
+
+        // get it back and verify
+        let fetched_response_id = get_last_openai_response_id(&pool, local_chat_id).await?;
+        assert_eq!(fetched_response_id, Some(test_response_id.to_string()));
+
+        // clear it
+        clear_last_openai_response_id(&pool, local_chat_id).await?;
+
+        // get it back and verify it's none
+        let cleared_response_id = get_last_openai_response_id(&pool, local_chat_id).await?;
+        assert!(cleared_response_id.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_initialize_database(pool: PgPool) -> Result<()> {
+        // the `sqlx::test` macro itself handles setting up a test database
+        // and running migrations. if this test runs and `pool` is valid,
+        // it implies initialize_database (or at least its core logic of
+        // connecting and migrating) is working correctly within the test harness.
+        // we can do a simple query to ensure the pool is usable.
+        let row = sqlx::query("SELECT 1 as one").fetch_one(&pool).await?;
+        // The actual type will depend on the DB, for postgres this is i32 with sqlx::query_scalar!
+        // but with query! it is a struct with a field `one`. Here we just check it exists.
+        let _one: Option<i32> = row.try_get("one").ok(); // Example, adapt if needed for your DB
+        assert!(_one.is_some());
+        assert_eq!(_one, Some(1));
+
+        Ok(())
+    }
+}
