@@ -18,7 +18,7 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         "sql_query".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "the sql select query to execute against the global-specific database. must start with 'select'. provide the full query."
+                "the sql query to execute against the global-specific database. provide the full query."
             )
             .build(),
     );
@@ -31,7 +31,7 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     ToolDefinition::new(
         GLOBALDB_TOOL_NAME.to_string(),
         Some(
-            "executes a sql select query against a read-only global database. provide the complete sql query. important tables and columns will be described by the assistant if known."
+            "executes a sql query against a read-only global database. provide the complete sql query. important tables and columns will be described by the assistant if known."
                 .to_string(),
         ),
         Some(tool_params),
@@ -65,17 +65,7 @@ async fn execute_globaldb_db_query(query: &str) -> JsonValue {
         }
     };
 
-    let trimmed_query = query.trim().to_lowercase();
-    if !trimmed_query.starts_with("select") {
-        warn!(query = %query, "(globaldb executor) rejected non-select query.");
-        return json!({
-            "status": "error",
-            "message": "invalid query type. only select queries are permitted for globaldb.",
-            "details": format!("query was: {}", query)
-        });
-    }
-
-    info!(query = %query, "(globaldb executor) executing select db query");
+    info!(query = %query, "(globaldb executor) executing db query");
     match sqlx::query(query).fetch_all(&pool).await {
         // Use the new pool
         Ok(rows) => {
