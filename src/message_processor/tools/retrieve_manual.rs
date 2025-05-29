@@ -99,20 +99,20 @@ pub async fn execute_retrieve_manual(
                 _ => {
                     // this case should ideally not be reached if openai respects the enum
                     warn!(manual_name = %args.manual_name, "invalid manual name provided");
-                    return Ok(json!({
+                    Ok(json!({
                         "status": "error",
                         "message": "invalid_manual_name",
                         "details": format!("manual_name must be one of the defined enum values, got: {}", args.manual_name)
-                    }).to_string());
+                    }).to_string())
                 }
             }
         }
         Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {e}");
-            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            let err_msg = format!("failed to parse arguments for retrieve_manual: {e}");
+            warn!(args = %arguments_json_str, error = %err_msg);
             Ok(json!({
                 "status": "error",
-                "message": "failed_to_parse_arguments",
+                "message": "argument_parsing_error",
                 "details": err_msg
             })
             .to_string())
