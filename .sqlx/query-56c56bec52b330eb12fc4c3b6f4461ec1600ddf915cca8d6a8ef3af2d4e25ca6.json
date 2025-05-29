@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE chats SET last_openai_response_id = $1, updated_at = now() WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "56c56bec52b330eb12fc4c3b6f4461ec1600ddf915cca8d6a8ef3af2d4e25ca6"
+}
