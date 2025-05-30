@@ -1,6 +1,7 @@
 pub mod beacon_slot_check;
 pub mod conversation_admin;
 pub mod database_schema;
+pub mod db_utils;
 pub mod globaldb_query;
 pub mod mevdb_query;
 pub mod retrieve_manual;
