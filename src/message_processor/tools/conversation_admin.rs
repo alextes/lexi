@@ -133,3 +133,175 @@ pub async fn execute_conversation_admin_command(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*; // imports functions and constants from the parent module
+    use crate::message_processor::HandlerContext; // for dummy context
+    use reqwest::Client;
+    use sqlx::PgPool;
+
+    // helper to create a dummy HandlerContext, not strictly needed if _ctx is unused
+    // but good for completeness if the function signature changes.
+    fn dummy_handler_context<'a>(
+        pool: &'a PgPool,
+        http_client: &'a Client,
+        openai_api_key: &'a str,
+    ) -> HandlerContext<'a> {
+        HandlerContext {
+            pool,
+            http_client,
+            bot_db_id: 0,
+            openai_api_key,
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_command_success(pool: PgPool) {
+        let admin_code = ENV_CONFIG
+            .bot_admin_code
+            .clone()
+            .unwrap_or_else(|| "vatu".to_string());
+        let args = json!({
+            "command": RESET_CONVERSATION_COMMAND_NAME,
+            ADMIN_CODE_PARAM_NAME: admin_code
+        })
+        .to_string();
+
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, &args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["action"], "reset_conversation");
+        assert_eq!(result_json["status"], "success");
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_invalid_command(pool: PgPool) {
+        let args = json!({
+            "command": "wrong_command",
+            ADMIN_CODE_PARAM_NAME: &*EXPECTED_ADMIN_CODE
+        })
+        .to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, &args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert!(result_json["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid command"));
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_invalid_code(pool: PgPool) {
+        let args = json!({
+            "command": RESET_CONVERSATION_COMMAND_NAME,
+            ADMIN_CODE_PARAM_NAME: "wrong_code"
+        })
+        .to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, &args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(result_json["message"], "invalid admin_code provided.");
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_missing_command(pool: PgPool) {
+        let args = json!({
+            ADMIN_CODE_PARAM_NAME: &*EXPECTED_ADMIN_CODE
+        })
+        .to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, &args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert!(result_json["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing required argument(s): 'command'"));
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_missing_code(pool: PgPool) {
+        let args = json!({
+            "command": RESET_CONVERSATION_COMMAND_NAME
+        })
+        .to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, &args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert!(result_json["message"].as_str().unwrap().contains(&format!(
+            "missing required argument(s): '{}'",
+            ADMIN_CODE_PARAM_NAME
+        )));
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_malformed_json(pool: PgPool) {
+        let args = "not a json string";
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(
+            result_json["message"],
+            "failed to parse tool arguments as json."
+        );
+    }
+
+    #[sqlx::test]
+    async fn test_execute_conversation_admin_empty_json_object(pool: PgPool) {
+        let args = "{}";
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_conversation_admin_command(&ctx, args)
+            .await
+            .unwrap();
+        let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        let msg = result_json["message"].as_str().unwrap();
+        assert!(msg.contains("'command'"));
+        assert!(msg.contains(&format!("'{}'", ADMIN_CODE_PARAM_NAME)));
+    }
+}

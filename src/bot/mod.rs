@@ -66,7 +66,8 @@ pub fn extract_prompt_from_mention(
             if entity.entity_type == "mention" {
                 let mention_text = &text[entity.offset..entity.offset + entity.length];
                 if mention_text.eq_ignore_ascii_case(BOT_USERNAME) {
-                    return text.replace(mention_text, "").trim().to_string();
+                    let temp_text = text.replace(mention_text, "");
+                    return temp_text.split_whitespace().collect::<Vec<_>>().join(" ");
                 }
             }
         }
@@ -367,4 +368,259 @@ pub async fn handle_telegram_update(ctx: &BotContext<'_>, update: &TelegramUpdat
         debug!("received update without a message (e.g., edited message, callback query), skipping direct reply logic.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telegram::types::MessageEntity; // For creating MessageEntity instances
+
+    // tests for mentions_bot
+    #[test]
+    fn test_mentions_bot_true_when_mentioned() {
+        let text = Some(format!("hello {} how are you", BOT_USERNAME));
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 6, // Start of "@lexi_alex_bot"
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert!(mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_when_not_mentioned() {
+        let text = Some("hello regular user".to_string());
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 6,
+            length: 12, // "regular user"
+            url: None,
+            user: None,
+        }]);
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_with_text_no_entities() {
+        let text = Some(format!("hello {}", BOT_USERNAME));
+        let entities: Option<Vec<MessageEntity>> = None;
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_with_entities_no_text() {
+        let text: Option<String> = None;
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 0,
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_with_no_text_no_entities() {
+        let text: Option<String> = None;
+        let entities: Option<Vec<MessageEntity>> = None;
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_with_empty_entities_list() {
+        let text = Some(format!("hello {}", BOT_USERNAME));
+        let entities = Some(Vec::new());
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_false_for_other_mention() {
+        let text = Some("hello @other_bot how are you".to_string());
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 6,
+            length: 10, // "@other_bot"
+            url: None,
+            user: None,
+        }]);
+        assert!(!mentions_bot(&text, &entities));
+    }
+
+    #[test]
+    fn test_mentions_bot_true_case_insensitive() {
+        let text = Some(format!("hello {}", BOT_USERNAME.to_uppercase()));
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 6,
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        // Assuming BOT_USERNAME is lowercase, the mention in text is uppercase
+        // The comparison in mentions_bot is case-insensitive.
+        assert!(mentions_bot(&text, &entities));
+    }
+
+    // tests for extract_prompt_from_mention
+    #[test]
+    fn test_extract_prompt_mention_at_start() {
+        let text = format!("{} what is the weather?", BOT_USERNAME);
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 0,
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert_eq!(
+            extract_prompt_from_mention(&text, &entities),
+            "what is the weather?"
+        );
+    }
+
+    #[test]
+    fn test_extract_prompt_mention_in_middle() {
+        let text = format!("hey {} tell me a joke", BOT_USERNAME);
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 4, // After "hey "
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert_eq!(
+            extract_prompt_from_mention(&text, &entities),
+            "hey tell me a joke"
+        );
+    }
+
+    #[test]
+    fn test_extract_prompt_mention_at_end() {
+        let text_prefix = "summarize this for me ";
+        let bot_mention_segment = BOT_USERNAME;
+        let text = format!("{}{}", text_prefix, bot_mention_segment);
+
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: text_prefix.len(),
+            length: bot_mention_segment.len(),
+            url: None,
+            user: None,
+        }]);
+
+        println!(
+            "test_extract_prompt_mention_at_end: text = '{}' (len: {} bytes, {} chars)",
+            text,
+            text.len(),
+            text.chars().count()
+        );
+        println!(
+            "test_extract_prompt_mention_at_end: text_prefix = '{}' (len: {})",
+            text_prefix,
+            text_prefix.len()
+        );
+        println!(
+            "test_extract_prompt_mention_at_end: bot_mention_segment = '{}' (len: {})",
+            bot_mention_segment,
+            bot_mention_segment.len()
+        );
+
+        if let Some(ents) = &entities {
+            if !ents.is_empty() {
+                let entity = &ents[0];
+                println!(
+                    "test_extract_prompt_mention_at_end: entity.offset = {}, entity.length = {}",
+                    entity.offset, entity.length
+                );
+                let end_slice = entity.offset + entity.length;
+                println!(
+                    "test_extract_prompt_mention_at_end: calculated slice end = {}",
+                    end_slice
+                );
+            }
+        }
+
+        assert_eq!(
+            extract_prompt_from_mention(&text, &entities),
+            text_prefix.trim_end().to_string() // Ensure it's a String for comparison
+        );
+    }
+
+    #[test]
+    fn test_extract_prompt_no_mention_in_text() {
+        let text = "just a regular message".to_string();
+        let entities: Option<Vec<MessageEntity>> = None;
+        assert_eq!(extract_prompt_from_mention(&text, &entities), text);
+    }
+
+    #[test]
+    fn test_extract_prompt_mention_text_no_entities() {
+        let text = format!("{} what if entities are missing?", BOT_USERNAME);
+        let entities: Option<Vec<MessageEntity>> = None;
+        // Should return original text if entities are None, even if text contains mention string
+        assert_eq!(extract_prompt_from_mention(&text, &entities), text);
+    }
+
+    #[test]
+    fn test_extract_prompt_other_mention() {
+        let text = "hey @other_bot what is up".to_string();
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 4,
+            length: 10, // "@other_bot"
+            url: None,
+            user: None,
+        }]);
+        assert_eq!(extract_prompt_from_mention(&text, &entities), text);
+    }
+
+    #[test]
+    fn test_extract_prompt_case_insensitive_mention() {
+        let text = format!("{} HELP ME", BOT_USERNAME.to_uppercase());
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 0,
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert_eq!(extract_prompt_from_mention(&text, &entities), "HELP ME");
+    }
+
+    #[test]
+    fn test_extract_prompt_empty_text() {
+        let text = "";
+        let entities: Option<Vec<MessageEntity>> = None;
+        assert_eq!(extract_prompt_from_mention(text, &entities), "");
+    }
+
+    #[test]
+    fn test_extract_prompt_only_mention() {
+        let text = BOT_USERNAME.to_string();
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 0,
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        assert_eq!(extract_prompt_from_mention(&text, &entities), "");
+    }
+
+    #[test]
+    fn test_extract_prompt_mention_with_leading_trailing_spaces_in_text() {
+        let text = format!("  {}  what now?  ", BOT_USERNAME);
+        let entities = Some(vec![MessageEntity {
+            entity_type: "mention".to_string(),
+            offset: 2, // after leading spaces
+            length: BOT_USERNAME.len(),
+            url: None,
+            user: None,
+        }]);
+        // .trim() in the function should handle the spaces around the extracted prompt
+        assert_eq!(extract_prompt_from_mention(&text, &entities), "what now?");
+    }
 }

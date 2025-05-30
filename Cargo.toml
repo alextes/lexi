@@ -46,3 +46,4 @@ tracing-subscriber = { version = "0.3", features = [
 
 [dev-dependencies]
 mockito = "1.7"
+tempfile = "3.20"
