@@ -24,10 +24,7 @@ pub async fn run_bot_loop(
     bot_db_id: i32,
 ) -> Result<()> {
     let mut last_update_id = 0;
-    info!(
-        bot_db_id,
-        "(bot::loop) bot loop started. listening for updates..."
-    ); // updated log prefix
+    info!(bot_db_id, "bot loop started. listening for updates...");
 
     let bot_ctx = BotContext {
         // Use BotContext from super
@@ -47,14 +44,14 @@ pub async fn run_bot_loop(
             last_update_id + 1
         );
 
-        debug!("(bot::loop) requesting updates: {}", get_updates_url);
+        debug!("requesting updates: {}", get_updates_url);
 
         let response = http_client
             .get(&get_updates_url)
             .send()
             .await
             .wrap_err_with(|| {
-                format!("(bot::loop) failed to send getUpdates request to URL: {get_updates_url}")
+                format!("failed to send getUpdates request to URL: {get_updates_url}")
             })?;
 
         let status = response.status();
@@ -62,18 +59,18 @@ pub async fn run_bot_loop(
             let api_response = response
                 .json::<ApiResponse<Vec<Update>>>()
                 .await
-                .wrap_err_with(|| "(bot::loop) failed to parse json response from getUpdates")?;
+                .wrap_err("failed to parse json response from getUpdates")?;
 
             if api_response.ok {
                 if let Some(updates) = api_response.result {
                     if updates.is_empty() {
-                        trace!("(bot::loop) no new updates received.");
+                        trace!("no new updates received.");
                     } else {
-                        info!("(bot::loop) received {} updates.", updates.len());
+                        info!("received {} updates.", updates.len());
                     }
                     for update in updates {
                         last_update_id = update.update_id;
-                        debug!(raw_update_object = ?update, "(bot::loop) main loop: received update object from api");
+                        debug!(raw_update_object = ?update, "main loop: received update object from api");
 
                         if let Err(e) = handle_telegram_update(&bot_ctx, &update).await
                         // Call handle_telegram_update from super
@@ -81,12 +78,12 @@ pub async fn run_bot_loop(
                             error!(
                                 update_id = update.update_id,
                                 error = %e,
-                                "(bot::loop) failed to process update via bot::handle_telegram_update. continuing to next update."
+                                "failed to process update via bot::handle_telegram_update. continuing to next update."
                             );
                         }
                     }
                 } else {
-                    trace!("(bot::loop) api response ok, but no updates array in result.");
+                    trace!("api response ok, but no updates array in result.");
                 }
             } else {
                 warn!(
@@ -95,11 +92,11 @@ pub async fn run_bot_loop(
                         .as_deref()
                         .unwrap_or("unknown error"),
                     error_code = api_response.error_code,
-                    "(bot::loop) telegram api error (ok=false)"
+                    "telegram api error (ok=false)"
                 );
                 if let Some(code) = api_response.error_code {
                     if code == 401 || code == 404 {
-                        error!("(bot::loop) critical telegram api error ({}). please check your token. exiting loop.", code);
+                        error!("critical telegram api error ({}). please check your token. exiting loop.", code);
                         return Err(eyre::eyre!(
                             "telegram API error {}: {}",
                             code,
@@ -111,7 +108,7 @@ pub async fn run_bot_loop(
             }
         } else {
             let error_body = response.text().await.unwrap_or_default();
-            error!(status = %status, body = %error_body, "(bot::loop) http error during getUpdates");
+            error!(status = %status, body = %error_body, "http error during getUpdates");
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
     }

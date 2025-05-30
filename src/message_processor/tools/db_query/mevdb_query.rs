@@ -55,7 +55,7 @@ pub async fn execute_mevdb_query_tool(
                 let db_url = if let Some(url) = &ENV_CONFIG.mevdb_database_url {
                     url.as_str()
                 } else {
-                    warn!("(mevdb executor) MEVDB_DATABASE_URL not configured.");
+                    warn!("MEVDB_DATABASE_URL not configured.");
                     return Ok(json!({
                         "status": "error",
                         "message": "mevdb query tool is not configured (missing MEVDB_DATABASE_URL).",

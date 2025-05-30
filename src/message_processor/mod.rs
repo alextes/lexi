@@ -104,7 +104,7 @@ pub async fn process_single_prompt_for_cli(
                 info!(response_id = %response_id, "conversation reset was requested by ai/tool.");
                 Ok((
                     format!(
-                        "(conversation reset requested by ai/tool, message: \"{}\")",
+                        "conversation reset requested by ai/tool, message: \"{}\"",
                         message
                     ),
                     response_id,

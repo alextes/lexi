@@ -79,7 +79,7 @@ where
                                     column_type_name = %column_type_info,
                                     row_idx,
                                     err_msg,
-                                    "(db module) data conversion error"
+                                    "data conversion error"
                                 );
                                 return json!({
                                     "status": "error",

@@ -55,7 +55,7 @@ pub async fn execute_globaldb_query_tool(
                 let db_url = if let Some(url) = &ENV_CONFIG.globaldb_database_url {
                     url.as_str()
                 } else {
-                    warn!("(globaldb executor) GLOBALDB_DATABASE_URL not configured.");
+                    warn!("GLOBALDB_DATABASE_URL not configured.");
                     return Ok(json!({
                         "status": "error",
                         "message": "globaldb query tool is not configured (missing GLOBALDB_DATABASE_URL).",
