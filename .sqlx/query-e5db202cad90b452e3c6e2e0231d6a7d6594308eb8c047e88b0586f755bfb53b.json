@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT sender_id, text --, sent_at, u.username -- include username if joining with users table\n            FROM messages m\n            -- optional: join users u on m.sender_id = u.id \n            WHERE m.chat_id = $1\n            ORDER BY m.sent_at DESC -- get the latest n first\n            LIMIT $2;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sender_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "text",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "e5db202cad90b452e3c6e2e0231d6a7d6594308eb8c047e88b0586f755bfb53b"
+}

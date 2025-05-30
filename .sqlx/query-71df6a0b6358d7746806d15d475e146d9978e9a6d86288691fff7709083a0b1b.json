@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO users (telegram_id, username, first_name, last_name, is_bot, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, $5, now(), now())\n            ON CONFLICT (telegram_id) DO UPDATE SET\n                username = EXCLUDED.username,\n                first_name = EXCLUDED.first_name,\n                last_name = EXCLUDED.last_name,\n                is_bot = EXCLUDED.is_bot,\n                updated_at = now()\n            RETURNING id;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "71df6a0b6358d7746806d15d475e146d9978e9a6d86288691fff7709083a0b1b"
+}
