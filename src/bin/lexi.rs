@@ -5,7 +5,7 @@ use std::time::Duration;
 use tracing::info;
 
 use lexi::bot::r#loop::{run_bot_loop, TELEGRAM_API_URL};
-use lexi::db;
+use lexi::db::{self, Db};
 use lexi::env::ENV_CONFIG;
 use lexi::log;
 use lexi::telegram;
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
         .database_url
         .as_ref()
         .expect("DATABASE_URL is required for the main application");
-    let pool = db::initialize_database(db_url).await?;
+    let db_conn = db::PostgresDb::new(db_url).await?;
 
     let bot_token = env::var("TELEGRAM_BOT_TOKEN")
         .context("TELEGRAM_BOT_TOKEN not set in environment variables")?;
@@ -42,7 +42,8 @@ async fn main() -> Result<()> {
         .context("failed to get bot's own user details via getMe API")?;
     info!(?bot_user_from_api, "successfully fetched bot details");
 
-    let bot_db_id = db::upsert_user(&pool, &bot_user_from_api)
+    let bot_db_id = db_conn
+        .upsert_user(&bot_user_from_api)
         .await
         .wrap_err_with(|| {
             format!(
@@ -55,5 +56,12 @@ async fn main() -> Result<()> {
         bot_db_id, "bot user data upserted into database"
     );
 
-    run_bot_loop(pool, bot_token, reqwest_client, openai_api_key, bot_db_id).await
+    run_bot_loop(
+        db_conn,
+        bot_token,
+        reqwest_client,
+        openai_api_key,
+        bot_db_id,
+    )
+    .await
 }

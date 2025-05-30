@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
         .database_url
         .as_ref()
         .expect("DATABASE_URL is required.");
-    let pool = lexi::db::initialize_database(db_url).await?;
+    let db = lexi::db::PostgresDb::new(db_url).await?;
 
     let http_client = ReqwestClient::builder()
         .timeout(Duration::from_secs(120)) // Increased timeout for potentially longer AI calls
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     // Create the simplified HandlerContext for message_processor
     let mp_handler_ctx = MessageProcessorHandlerContext {
-        pool: &pool, // Pool might be needed by tools called via message_processor
+        db,
         http_client: &http_client,
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
         openai_api_key: &openai_api_key,

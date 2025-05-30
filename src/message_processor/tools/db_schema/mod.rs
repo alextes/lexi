@@ -1,6 +1,5 @@
 //! whenever writing sql queries this tool can help the ai see the full DB schema
 //! for database schemas we know about.
-use crate::message_processor::HandlerContext;
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
@@ -62,11 +61,8 @@ fn get_schema_from_file(file_path: &str, db_name: &str) -> Result<String> {
     })
 }
 
-#[instrument(skip(_ctx, arguments_json_str))]
-pub async fn execute_get_database_schema(
-    _ctx: &HandlerContext<'_>,
-    arguments_json_str: &str,
-) -> Result<String> {
+#[instrument(skip(arguments_json_str))]
+pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<String> {
     info!(
         args = %arguments_json_str,
         "executing get_database_schema tool"
@@ -115,28 +111,11 @@ pub async fn execute_get_database_schema(
 
 #[cfg(test)]
 mod tests {
-    use super::*; // access to execute_get_database_schema, MEVDB_SCHEMA_FILE_PATH, etc.
-    use crate::message_processor::HandlerContext; // for dummy context
-    use reqwest::Client;
+    use super::*;
     use serde_json::Value as JsonValue;
-    use sqlx::PgPool;
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    // dummy context helper
-    fn dummy_handler_context<'a>(
-        pool: &'a PgPool,
-        http_client: &'a Client,
-        openai_api_key: &'a str,
-    ) -> HandlerContext<'a> {
-        HandlerContext {
-            pool,
-            http_client,
-            bot_db_id: 0,
-            openai_api_key,
-        }
-    }
 
     // helper to create a temporary schema file for testing get_schema_from_file
     fn create_temp_schema_file(content: &str) -> NamedTempFile {
@@ -145,13 +124,9 @@ mod tests {
         temp_file
     }
 
-    #[sqlx::test]
-    async fn test_execute_get_database_schema_mevdb_success(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_get_database_schema_mevdb_success() {
         let args = json!({ "database_name": "mevdb" }).to_string();
-
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
         let expected_content = fs::read_to_string(MEVDB_SCHEMA_FILE_PATH).unwrap_or_default();
         if expected_content.is_empty() {
@@ -160,34 +135,28 @@ mod tests {
             );
         }
 
-        let result_str = execute_get_database_schema(&ctx, &args).await.unwrap();
+        let result_str = execute_get_database_schema(&args).await.unwrap();
         assert_eq!(result_str, expected_content);
     }
 
-    #[sqlx::test]
-    async fn test_execute_get_database_schema_globaldb_success(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_get_database_schema_globaldb_success() {
         let args = json!({ "database_name": "globaldb" }).to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
         let expected_content = fs::read_to_string(GLOBALDB_SCHEMA_FILE_PATH).unwrap_or_default();
         if expected_content.is_empty() {
             println!("warning: globaldb schema file is empty or not found, test might not be meaningful.");
         }
 
-        let result_str = execute_get_database_schema(&ctx, &args).await.unwrap();
+        let result_str = execute_get_database_schema(&args).await.unwrap();
         assert_eq!(result_str, expected_content);
     }
 
-    #[sqlx::test]
-    async fn test_execute_get_database_schema_invalid_name(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_get_database_schema_invalid_name() {
         let args = json!({ "database_name": "nonexistentdb" }).to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_get_database_schema(&ctx, &args).await.unwrap();
+        let result_str = execute_get_database_schema(&args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -198,28 +167,22 @@ mod tests {
             .contains("nonexistentdb"));
     }
 
-    #[sqlx::test]
-    async fn test_execute_get_database_schema_malformed_json_args(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_get_database_schema_malformed_json_args() {
         let args = "{\"database_name\": \"mevdb\" சுகாதார"; // malformed json
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_get_database_schema(&ctx, args).await.unwrap();
+        let result_str = execute_get_database_schema(args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
         assert_eq!(result_json["message"], "failed_to_parse_arguments");
     }
 
-    #[sqlx::test]
-    async fn test_execute_get_database_schema_missing_database_name_arg(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_get_database_schema_missing_database_name_arg() {
         let args = json!({}).to_string(); // empty json, missing database_name
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_get_database_schema(&ctx, &args).await.unwrap();
+        let result_str = execute_get_database_schema(&args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
         assert_eq!(result_json["status"], "error");
         assert_eq!(result_json["message"], "failed_to_parse_arguments");

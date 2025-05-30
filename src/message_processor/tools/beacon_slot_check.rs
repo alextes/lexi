@@ -1,3 +1,4 @@
+use crate::db::Db;
 use crate::env::ENV_CONFIG;
 use crate::message_processor::HandlerContext;
 use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
@@ -78,8 +79,8 @@ async fn fetch_beacon_header(
 }
 
 #[instrument(skip(ctx, arguments_json_str))]
-pub async fn execute_beacon_slot_check(
-    ctx: &HandlerContext<'_>,
+pub async fn execute_beacon_slot_check<D: Db>(
+    ctx: &HandlerContext<'_, D>,
     arguments_json_str: &str, // The arguments string from OutputFunctionCall
 ) -> Result<String> {
     // Returns a JSON string (SlotStatus or error)

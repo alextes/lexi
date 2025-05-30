@@ -1,5 +1,4 @@
 use crate::env::ENV_CONFIG;
-use crate::message_processor::HandlerContext;
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
@@ -67,11 +66,8 @@ fn reset_conversation_impl() -> String {
     .to_string()
 }
 
-#[instrument(skip(_ctx, arguments_json_str))]
-pub async fn execute_conversation_admin_command(
-    _ctx: &HandlerContext<'_>,
-    arguments_json_str: &str,
-) -> Result<String> {
+#[instrument(skip(arguments_json_str))]
+pub async fn execute_conversation_admin_command(arguments_json_str: &str) -> Result<String> {
     info!(args = %arguments_json_str, "executing conversation_admin_command tool");
 
     match serde_json::from_str::<HashMap<String, String>>(arguments_json_str) {
@@ -137,28 +133,10 @@ pub async fn execute_conversation_admin_command(
 
 #[cfg(test)]
 mod tests {
-    use super::*; // imports functions and constants from the parent module
-    use crate::message_processor::HandlerContext; // for dummy context
-    use reqwest::Client;
-    use sqlx::PgPool;
+    use super::*;
 
-    // helper to create a dummy HandlerContext, not strictly needed if _ctx is unused
-    // but good for completeness if the function signature changes.
-    fn dummy_handler_context<'a>(
-        pool: &'a PgPool,
-        http_client: &'a Client,
-        openai_api_key: &'a str,
-    ) -> HandlerContext<'a> {
-        HandlerContext {
-            pool,
-            http_client,
-            bot_db_id: 0,
-            openai_api_key,
-        }
-    }
-
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_command_success(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_command_success() {
         let admin_code = ENV_CONFIG
             .bot_admin_code
             .clone()
@@ -169,33 +147,22 @@ mod tests {
         })
         .to_string();
 
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
-
-        let result_str = execute_conversation_admin_command(&ctx, &args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(&args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["action"], "reset_conversation");
         assert_eq!(result_json["status"], "success");
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_invalid_command(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_invalid_command() {
         let args = json!({
             "command": "wrong_command",
             ADMIN_CODE_PARAM_NAME: &*EXPECTED_ADMIN_CODE
         })
         .to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, &args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(&args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -205,39 +172,29 @@ mod tests {
             .contains("invalid command"));
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_invalid_code(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_invalid_code() {
         let args = json!({
             "command": RESET_CONVERSATION_COMMAND_NAME,
             ADMIN_CODE_PARAM_NAME: "wrong_code"
         })
         .to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, &args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(&args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
         assert_eq!(result_json["message"], "invalid admin_code provided.");
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_missing_command(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_missing_command() {
         let args = json!({
             ADMIN_CODE_PARAM_NAME: &*EXPECTED_ADMIN_CODE
         })
         .to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, &args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(&args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -247,19 +204,14 @@ mod tests {
             .contains("missing required argument(s): 'command'"));
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_missing_code(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_missing_code() {
         let args = json!({
             "command": RESET_CONVERSATION_COMMAND_NAME
         })
         .to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, &args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(&args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -269,16 +221,11 @@ mod tests {
         )));
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_malformed_json(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_malformed_json() {
         let args = "not a json string";
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -288,16 +235,11 @@ mod tests {
         );
     }
 
-    #[sqlx::test]
-    async fn test_execute_conversation_admin_empty_json_object(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_conversation_admin_empty_json_object() {
         let args = "{}";
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_conversation_admin_command(&ctx, args)
-            .await
-            .unwrap();
+        let result_str = execute_conversation_admin_command(args).await.unwrap();
         let result_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");

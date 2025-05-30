@@ -4,9 +4,9 @@
 //! it is designed to be independent of the calling context (e.g., telegram, cli) and focuses solely
 //! on the ai interaction flow, returning the final ai message and the last openai response id.
 
+use crate::db::Db; // import the db trait
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
-use sqlx::PgPool; // still needed for HandlerContext as tools might use its pool field
 use tracing::{error, info, instrument};
 
 use crate::openai_api::{
@@ -27,17 +27,17 @@ pub enum AiConversationOutcome {
     ResetConversation(String, String),
 }
 
-#[derive(Clone)]
-pub struct HandlerContext<'a> {
-    pub pool: &'a PgPool,
+// #[derive(Clone)]
+pub struct HandlerContext<'a, D: Db> {
+    pub db: D,
     pub http_client: &'a ReqwestClient,
-    pub bot_db_id: i32, // Kept as some tools/logging might still reference it via context
+    pub bot_db_id: i32, // kept as some tools/logging might still reference it via context
     pub openai_api_key: &'a str,
 }
 
 #[instrument(skip(ctx, prompt_text, previous_response_id), fields(logging_chat_id = %logging_chat_id))]
-pub async fn drive_ai_conversation(
-    ctx: &HandlerContext<'_>,
+pub async fn drive_ai_conversation<D: Db>(
+    ctx: &HandlerContext<'_, D>,
     prompt_text: &str,
     logging_chat_id: i64, // This is used for logging within openai_chat and its tools
     previous_response_id: Option<&str>,
@@ -86,8 +86,8 @@ pub async fn drive_ai_conversation(
 }
 
 #[instrument(skip(ctx, prompt_text), fields(telegram_chat_id = %telegram_chat_id))]
-pub async fn process_single_prompt_for_cli(
-    ctx: &HandlerContext<'_>,
+pub async fn process_single_prompt_for_cli<D: Db>(
+    ctx: &HandlerContext<'_, D>,
     prompt_text: &str,
     telegram_chat_id: i64,
 ) -> Result<(String, String)> {

@@ -1,5 +1,4 @@
 use crate::env::ENV_CONFIG;
-use crate::message_processor::HandlerContext;
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
@@ -40,11 +39,8 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-#[instrument(skip(_ctx, arguments_json_str), fields(tool_name = MEVDB_TOOL_NAME))]
-pub async fn execute_mevdb_query_tool(
-    _ctx: &HandlerContext<'_>,
-    arguments_json_str: &str,
-) -> Result<String> {
+#[instrument(skip(arguments_json_str), fields(tool_name = MEVDB_TOOL_NAME))]
+pub async fn execute_mevdb_query_tool(arguments_json_str: &str) -> Result<String> {
     info!(args = %arguments_json_str, "executing execute_mevdb_query tool");
 
     match serde_json::from_str::<HashMap<String, String>>(arguments_json_str) {

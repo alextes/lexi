@@ -5,9 +5,9 @@
 //! and telegram api interactions at a high level, including bot token and api url configurations.
 //! this file lives at `src/bot/loop.rs`.
 
+use crate::db::Db;
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
-use sqlx::PgPool;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
@@ -17,7 +17,7 @@ use crate::telegram::types::{ApiResponse, Update};
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
 pub async fn run_bot_loop(
-    pool: PgPool,
+    db: impl Db + Clone,
     bot_token: String,
     http_client: ReqwestClient,
     openai_api_key: String,
@@ -27,9 +27,8 @@ pub async fn run_bot_loop(
     info!(bot_db_id, "bot loop started. listening for updates...");
 
     let bot_ctx = BotContext {
-        // Use BotContext from super
-        pool: &pool,
-        http_client: &http_client,
+        db,
+        http_client: http_client.clone(),
         api_base_url: TELEGRAM_API_URL,
         bot_token: &bot_token,
         bot_db_id,
@@ -72,9 +71,7 @@ pub async fn run_bot_loop(
                         last_update_id = update.update_id;
                         debug!(raw_update_object = ?update, "main loop: received update object from api");
 
-                        if let Err(e) = handle_telegram_update(&bot_ctx, &update).await
-                        // Call handle_telegram_update from super
-                        {
+                        if let Err(e) = handle_telegram_update(&bot_ctx, &update).await {
                             error!(
                                 update_id = update.update_id,
                                 error = %e,

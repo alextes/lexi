@@ -1,4 +1,10 @@
-use crate::message_processor::HandlerContext;
+//! tools for retrieving manuals from the filesystem
+//!
+//! manuals are stored in the `src/message_processor/tools/retrieve_manual/manuals` directory
+//! and are named like `generate_proposer_reimbursement.md`
+//!
+//! the tool is used to retrieve the content of a manual for the assistant to use
+//! when responding to user messages.
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
@@ -66,11 +72,8 @@ fn get_manual_content_from_file(manual_name: &str) -> Result<String> {
     })
 }
 
-#[instrument(skip(_ctx, arguments_json_str), fields(tool_name = RETRIEVE_MANUAL_TOOL_NAME))]
-pub async fn execute_retrieve_manual(
-    _ctx: &HandlerContext<'_>,
-    arguments_json_str: &str,
-) -> Result<String> {
+#[instrument(skip(arguments_json_str), fields(tool_name = RETRIEVE_MANUAL_TOOL_NAME))]
+pub async fn execute_retrieve_manual(arguments_json_str: &str) -> Result<String> {
     info!(
         args = %arguments_json_str,
         "executing retrieve_manual tool"
@@ -124,37 +127,16 @@ pub async fn execute_retrieve_manual(
 
 #[cfg(test)]
 mod tests {
-    use super::*; // access to execute_retrieve_manual, constants
-    use crate::message_processor::HandlerContext;
-    use reqwest::Client;
+    use super::*;
     use serde_json::Value as JsonValue;
-    use sqlx::PgPool;
     use std::fs;
     use std::io::Write;
     use std::path::Path;
 
-    // dummy context helper
-    fn dummy_handler_context<'a>(
-        pool: &'a PgPool,
-        http_client: &'a Client,
-        openai_api_key: &'a str,
-    ) -> HandlerContext<'a> {
-        HandlerContext {
-            pool,
-            http_client,
-            bot_db_id: 0,
-            openai_api_key,
-        }
-    }
-
-    #[sqlx::test]
-    async fn test_execute_retrieve_manual_success(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_retrieve_manual_success() {
         let manual_name = GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME;
         let args = json!({ "manual_name": manual_name }).to_string();
-
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
         let expected_file_path = format!("{}{}.md", MANUALS_DIR_PATH, manual_name);
         let expected_content = fs::read_to_string(&expected_file_path).unwrap_or_else(|e| {
@@ -164,22 +146,19 @@ mod tests {
             )
         });
 
-        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_str = execute_retrieve_manual(&args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["manual_name"], manual_name);
         assert_eq!(result_json["manual_content"], expected_content);
     }
 
-    #[sqlx::test]
-    async fn test_execute_retrieve_manual_invalid_name(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_retrieve_manual_invalid_name() {
         let manual_name = "non_existent_manual";
         let args = json!({ "manual_name": manual_name }).to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_str = execute_retrieve_manual(&args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -190,8 +169,8 @@ mod tests {
             .contains(manual_name));
     }
 
-    #[sqlx::test]
-    async fn test_execute_retrieve_manual_file_not_found_for_valid_enum(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_retrieve_manual_file_not_found_for_valid_enum() {
         let manual_name = GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME;
         let actual_file_path = format!("{}{}.md", MANUALS_DIR_PATH, manual_name);
         let temp_renamed_path = format!("{}.temp_test_backup", actual_file_path);
@@ -203,11 +182,8 @@ mod tests {
         }
 
         let args = json!({ "manual_name": manual_name }).to_string();
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_str = execute_retrieve_manual(&args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");
@@ -218,14 +194,11 @@ mod tests {
         }
     }
 
-    #[sqlx::test]
-    async fn test_execute_retrieve_manual_malformed_json_args(pool: PgPool) {
+    #[tokio::test]
+    async fn test_execute_retrieve_manual_malformed_json_args() {
         let args = "{\"manual_name\": \"name\" சுகாதார"; // malformed json
-        let http_client = Client::new();
-        let openai_key = "dummy_key";
-        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
 
-        let result_str = execute_retrieve_manual(&ctx, args).await.unwrap();
+        let result_str = execute_retrieve_manual(args).await.unwrap();
         let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
 
         assert_eq!(result_json["status"], "error");

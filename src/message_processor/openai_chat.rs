@@ -7,9 +7,12 @@
 //! or a command-line interface for testing.
 
 use super::AiConversationOutcome;
-use crate::openai_api::{
-    self, CallResponsesApiOptionalArgs, InputItem, InputMessageObject, OpenAiApiResponse,
-    OutputFunctionCall, OutputItem, ToolDefinition,
+use crate::{
+    db::Db,
+    openai_api::{
+        self, CallResponsesApiOptionalArgs, InputItem, InputMessageObject, OpenAiApiResponse,
+        OutputFunctionCall, OutputItem, ToolDefinition,
+    },
 };
 use eyre::Result;
 use serde_json::Value as JsonValue;
@@ -92,8 +95,8 @@ fn parse_api_response_output(
 
 /// executes a single tool function call based on its name.
 #[instrument(skip(ctx, fc_request), fields(tool_name = %fc_request.name))]
-async fn execute_tool_call(
-    ctx: &super::HandlerContext<'_>,
+async fn execute_tool_call<D: Db>(
+    ctx: &super::HandlerContext<'_, D>,
     fc_request: &OutputFunctionCall,
 ) -> Result<String> {
     use super::tools::*;
@@ -104,15 +107,15 @@ async fn execute_tool_call(
     if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
         beacon_slot_check::execute_beacon_slot_check(ctx, arguments).await
     } else if tool_name == db_schema::DATABASE_SCHEMA_TOOL_NAME {
-        db_schema::execute_get_database_schema(ctx, arguments).await
+        db_schema::execute_get_database_schema(arguments).await
     } else if tool_name == db_query::MEVDB_TOOL_NAME {
-        db_query::execute_mevdb_query_tool(ctx, arguments).await
+        db_query::execute_mevdb_query_tool(arguments).await
     } else if tool_name == db_query::GLOBALDB_TOOL_NAME {
-        db_query::execute_globaldb_query_tool(ctx, arguments).await
+        db_query::execute_globaldb_query_tool(arguments).await
     } else if tool_name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
-        conversation_admin::execute_conversation_admin_command(ctx, arguments).await
+        conversation_admin::execute_conversation_admin_command(arguments).await
     } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {
-        retrieve_manual::execute_retrieve_manual(ctx, arguments).await
+        retrieve_manual::execute_retrieve_manual(arguments).await
     } else {
         warn!("received unexpected tool name for execution");
         Ok(format!(
@@ -125,8 +128,8 @@ async fn execute_tool_call(
 // processes the response from the openai api, handling direct messages or dispatching to tool handlers.
 // this is the core loop that handles sequences of api calls if tools are involved.
 #[instrument(skip_all)]
-pub(super) async fn process_openai_response_loop(
-    ctx: &super::HandlerContext<'_>,
+pub(super) async fn process_openai_response_loop<D: Db>(
+    ctx: &super::HandlerContext<'_, D>,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>,
@@ -268,8 +271,8 @@ pub(super) async fn process_openai_response_loop(
     }
 }
 
-pub async fn start_ai_processing_loop(
-    ctx: &super::HandlerContext<'_>,
+pub async fn start_ai_processing_loop<D: Db>(
+    ctx: &super::HandlerContext<'_, D>,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
 ) -> Result<AiConversationOutcome> {
