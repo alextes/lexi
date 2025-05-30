@@ -220,7 +220,7 @@ mod tests {
             let parent_dir = Path::new(&expected_file_path).parent().unwrap();
             fs::create_dir_all(parent_dir).unwrap();
             let mut file = fs::File::create(&expected_file_path).unwrap();
-            writeln!(file, "{}", dummy_content).unwrap();
+            write!(file, "{}", dummy_content).unwrap();
 
             let result = get_manual_content_from_file(manual_name);
             assert!(result.is_ok());
