@@ -44,6 +44,7 @@ jobs:
         image: postgres
         env:
           POSTGRES_PASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -78,9 +79,8 @@ jobs:
         with:
           tool: sqlx-cli
 
+      - run: cargo sqlx migrate run
       - run: cargo sqlx prepare --check -- --all-targets
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
   lint:
     strategy:
