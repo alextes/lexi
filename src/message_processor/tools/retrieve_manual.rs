@@ -119,3 +119,154 @@ pub async fn execute_retrieve_manual(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*; // access to execute_retrieve_manual, constants
+    use crate::message_processor::HandlerContext;
+    use reqwest::Client;
+    use serde_json::Value as JsonValue;
+    use sqlx::PgPool;
+    use std::fs;
+    use std::io::Write;
+    use std::path::Path;
+
+    // dummy context helper
+    fn dummy_handler_context<'a>(
+        pool: &'a PgPool,
+        http_client: &'a Client,
+        openai_api_key: &'a str,
+    ) -> HandlerContext<'a> {
+        HandlerContext {
+            pool,
+            http_client,
+            bot_db_id: 0,
+            openai_api_key,
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_execute_retrieve_manual_success(pool: PgPool) {
+        let manual_name = GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME;
+        let args = json!({ "manual_name": manual_name }).to_string();
+
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let expected_file_path = format!("{}{}.md", MANUALS_DIR_PATH, manual_name);
+        let expected_content = fs::read_to_string(&expected_file_path).unwrap_or_else(|e| {
+            panic!(
+                "failed to read the actual manual file for test: {}. error: {}",
+                expected_file_path, e
+            )
+        });
+
+        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["manual_name"], manual_name);
+        assert_eq!(result_json["manual_content"], expected_content);
+    }
+
+    #[sqlx::test]
+    async fn test_execute_retrieve_manual_invalid_name(pool: PgPool) {
+        let manual_name = "non_existent_manual";
+        let args = json!({ "manual_name": manual_name }).to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(result_json["message"], "invalid_manual_name");
+        assert!(result_json["details"]
+            .as_str()
+            .unwrap()
+            .contains(manual_name));
+    }
+
+    #[sqlx::test]
+    async fn test_execute_retrieve_manual_file_not_found_for_valid_enum(pool: PgPool) {
+        let manual_name = GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME;
+        let actual_file_path = format!("{}{}.md", MANUALS_DIR_PATH, manual_name);
+        let temp_renamed_path = format!("{}.temp_test_backup", actual_file_path);
+        let mut file_renamed = false;
+
+        if Path::new(&actual_file_path).exists() {
+            fs::rename(&actual_file_path, &temp_renamed_path).unwrap();
+            file_renamed = true;
+        }
+
+        let args = json!({ "manual_name": manual_name }).to_string();
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_retrieve_manual(&ctx, &args).await.unwrap();
+        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(result_json["message"], "failed_to_read_manual_file");
+
+        if file_renamed {
+            fs::rename(&temp_renamed_path, &actual_file_path).unwrap();
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_execute_retrieve_manual_malformed_json_args(pool: PgPool) {
+        let args = "{\"manual_name\": \"name\" சுகாதார"; // malformed json
+        let http_client = Client::new();
+        let openai_key = "dummy_key";
+        let ctx = dummy_handler_context(&pool, &http_client, &openai_key);
+
+        let result_str = execute_retrieve_manual(&ctx, args).await.unwrap();
+        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(result_json["message"], "argument_parsing_error");
+    }
+
+    #[test]
+    fn test_get_manual_content_from_file_success() {
+        // This test requires a known file to exist at the location specified by MANUALS_DIR_PATH
+        // For true unit testing, this function would need to be refactored or the fs module mocked.
+        // We will test with GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME assuming it exists.
+        let manual_name = GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME;
+        let expected_file_path = format!("{}{}.md", MANUALS_DIR_PATH, manual_name);
+
+        if !Path::new(&expected_file_path).exists() {
+            // Create a dummy file for the test if it doesn't exist to prevent panic
+            // This is a workaround for environments where the file might be missing.
+            let dummy_content = "dummy content for test_get_manual_content_from_file_success";
+            let parent_dir = Path::new(&expected_file_path).parent().unwrap();
+            fs::create_dir_all(parent_dir).unwrap();
+            let mut file = fs::File::create(&expected_file_path).unwrap();
+            writeln!(file, "{}", dummy_content).unwrap();
+
+            let result = get_manual_content_from_file(manual_name);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), dummy_content);
+
+            // Clean up dummy file
+            fs::remove_file(&expected_file_path).unwrap();
+        } else {
+            let expected_content = fs::read_to_string(&expected_file_path).unwrap();
+            let result = get_manual_content_from_file(manual_name);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), expected_content);
+        }
+    }
+
+    #[test]
+    fn test_get_manual_content_from_file_not_found() {
+        let result = get_manual_content_from_file("surely_this_manual_does_not_exist_for_test");
+        assert!(result.is_err());
+        let err_msg = result.err().unwrap().to_string();
+        assert!(err_msg.contains("failed to read manual file"));
+        assert!(err_msg.contains("surely_this_manual_does_not_exist_for_test.md"));
+    }
+}
