@@ -1,16 +1,34 @@
+// this is the new src/message_processor/tools/db/mod.rs
+
+// declare the submodules first, standard practice
+mod globaldb_query;
+mod mevdb_query;
+
+pub use globaldb_query::GLOBALDB_TOOL_NAME;
+pub use mevdb_query::MEVDB_TOOL_NAME;
+pub use globaldb_query::execute_globaldb_query_tool;
+pub use mevdb_query::execute_mevdb_query_tool;
+pub use globaldb_query::GLOBALDB_QUERY_TOOL;
+pub use mevdb_query::MEVDB_QUERY_TOOL;
+
+// original content from db_utils.rs starts here
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use sqlx::{types::BigDecimal, Column, PgPool, Row, ValueRef};
+use sqlx::{types::BigDecimal, Column, Row, ValueRef, Executor};
 use tracing::{error, info};
 
 // this function will be called by both mevdb_query and globaldb_query
-pub async fn execute_db_query_common(
-    pool: &PgPool,
+// it's now a public function within the db module.
+pub async fn execute_db_query_common<'c, E>(
+    executor: E,
     query: &str,
     tool_name: &str, // for logging purposes, e.g., "mevdb" or "globaldb"
-) -> JsonValue {
-    info!(query = %query, tool = tool_name, "(db_utils) attempting to execute db query using provided pool");
+) -> JsonValue
+where
+    E: Executor<'c, Database = sqlx::Postgres>,
+{
+    info!(query = %query, tool = tool_name, "(db module) attempting to execute db query using provided executor"); // updated log origin
 
-    match sqlx::query(query).fetch_all(pool).await {
+    match sqlx::query(query).fetch_all(executor).await {
         Ok(rows) => {
             if rows.is_empty() {
                 return json!({
@@ -29,7 +47,6 @@ pub async fn execute_db_query_common(
                             json_row.insert(column_name.to_string(), json!(null));
                         }
                         Ok(_non_null_raw_value) => {
-                            // value is not null, proceed with typed parsing
                             let value: JsonValue = if let Ok(v_str) =
                                 row.try_get::<String, _>(col_idx)
                             {
@@ -41,8 +58,7 @@ pub async fn execute_db_query_common(
                             } else if let Ok(v_f64) = row.try_get::<f64, _>(col_idx) {
                                 json!(v_f64)
                             } else if let Ok(v_dec) = row.try_get::<BigDecimal, _>(col_idx) {
-                                // using BigDecimal here
-                                json!(v_dec.to_string()) // bigdecimal to_string typically normalizes
+                                json!(v_dec.to_string())
                             } else if let Ok(v_bool) = row.try_get::<bool, _>(col_idx) {
                                 json!(v_bool)
                             } else if let Ok(v_time) =
@@ -63,7 +79,7 @@ pub async fn execute_db_query_common(
                                     column_type_name = %column_type_info,
                                     row_idx,
                                     err_msg,
-                                    "(db_utils) data conversion error"
+                                    "(db module) data conversion error" // updated log origin
                                 );
                                 return json!({
                                     "status": "error",
@@ -74,7 +90,6 @@ pub async fn execute_db_query_common(
                             json_row.insert(column_name.to_string(), value);
                         }
                         Err(e) => {
-                            // error from try_get_raw itself
                             let err_msg = format!(
                                 "failed to retrieve raw value for column '{}' (type: {:?}, reported type name: {}) in row {}: {}. this might indicate a problem with the query or db connection.",
                                 column_name,
@@ -83,7 +98,7 @@ pub async fn execute_db_query_common(
                                 row_idx,
                                 e
                             );
-                            error!(tool = tool_name, column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "(db_utils) raw data retrieval error");
+                            error!(tool = tool_name, column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "(db module) raw data retrieval error"); // updated log origin
                             return json!({
                                 "status": "error",
                                 "message": "failed to retrieve data from database for a column.",
@@ -97,7 +112,7 @@ pub async fn execute_db_query_common(
             json!(results)
         }
         Err(e) => {
-            error!(error = %e, query = %query, tool = tool_name, "(db_utils) failed to execute sql query");
+            error!(error = %e, query = %query, tool = tool_name, "(db module) failed to execute sql query"); // updated log origin
             json!({
                 "status": "error",
                 "message": format!("failed to execute {} sql query.", tool_name),
@@ -107,19 +122,16 @@ pub async fn execute_db_query_common(
     }
 }
 
-// an example of how to add tests later
 #[cfg(test)]
 mod tests {
-    // Let's be explicit with imports for clarity within the test module
-    use crate::message_processor::tools::db_utils::execute_db_query_common;
+    // use crate::message_processor::tools::db_utils::execute_db_query_common; // old path
+    use super::execute_db_query_common; // new path as it's in the parent module (db/mod.rs)
     use sqlx::{types::BigDecimal, PgPool};
     use std::str::FromStr;
-    use eyre::Result; // For the test function's return type
-    // serde_json::json is not directly used here anymore, execute_db_query_common returns it.
+    use eyre::Result; 
 
     #[sqlx::test] 
     async fn test_numeric_type_handling(pool: PgPool) -> Result<()> { 
-        // Reverted to plain CREATE TABLE, relying on sqlx::test for isolation/cleanup
         let create_table_query = "CREATE TABLE test_numeric_types (id SERIAL PRIMARY KEY, numeric_val NUMERIC(20, 10));";
         let insert_data_query = "INSERT INTO test_numeric_types (numeric_val) VALUES (12345.6789), (NULL), (0.123), (9876543210.123456789);";
         let select_data_query = "SELECT numeric_val FROM test_numeric_types ORDER BY id;";
@@ -170,6 +182,4 @@ mod tests {
         
         Ok(())
     }
-
-    // add more tests here: test_all_types, test_no_rows, test_error_handling etc.
 }

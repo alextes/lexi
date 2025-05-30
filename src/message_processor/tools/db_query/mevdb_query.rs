@@ -5,22 +5,22 @@ use crate::openai_api::{
 };
 use eyre::Result;
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::Connection;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tracing::{error, info, warn};
 
-use super::db_utils::execute_db_query_common;
+use super::execute_db_query_common;
 
-pub const GLOBALDB_TOOL_NAME: &str = "execute_globaldb_query";
+pub const MEVDB_TOOL_NAME: &str = "execute_mevdb_query";
 
-pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
+pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     let mut params_props = HashMap::new();
     params_props.insert(
         "sql_query".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "the sql query to execute against the global-specific database. provide the full query."
+                "the sql query to execute against the mev-specific database. provide the full query."
             )
             .build(),
     );
@@ -31,48 +31,51 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         additional_properties: false,
     };
     ToolDefinition::new(
-        GLOBALDB_TOOL_NAME.to_string(),
+        MEVDB_TOOL_NAME.to_string(),
         Some(
-            "executes a sql query against a read-only global database. provide the complete sql query. important tables and columns will be described by the assistant if known."
+            "executes a sql query against a read-only mev (maximal extractable value) database. provide the complete sql query. important tables and columns will be described by the assistant if known."
                 .to_string(),
         ),
         Some(tool_params),
     )
 });
 
-pub async fn execute_globaldb_query_tool(
+pub async fn execute_mevdb_query_tool(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,
 ) -> Result<String> {
-    info!(args = %arguments_json_str, "executing execute_globaldb_query tool");
+    info!(args = %arguments_json_str, "executing execute_mevdb_query tool");
 
     match serde_json::from_str::<HashMap<String, String>>(arguments_json_str) {
         Ok(args_map) => {
             if let Some(sql_query_from_ai) = args_map.get("sql_query") {
                 info!(query = %sql_query_from_ai, "parsed sql_query from ai arguments");
 
-                let db_url = if let Some(url) = &ENV_CONFIG.globaldb_database_url {
+                let db_url = if let Some(url) = &ENV_CONFIG.mevdb_database_url {
                     url.as_str()
                 } else {
-                    warn!("(globaldb executor) GLOBALDB_DATABASE_URL not configured.");
+                    warn!("(mevdb executor) MEVDB_DATABASE_URL not configured.");
                     return Ok(json!({
                         "status": "error",
-                        "message": "globaldb query tool is not configured (missing GLOBALDB_DATABASE_URL).",
-                        "details": "The GLOBALDB_DATABASE_URL environment variable must be set to use this tool."
+                        "message": "mevdb query tool is not configured (missing MEVDB_DATABASE_URL).",
+                        "details": "The MEVDB_DATABASE_URL environment variable must be set to use this tool."
                     }).to_string());
                 };
 
-                match PgPool::connect(db_url).await {
-                    Ok(pool) => {
+                match sqlx::postgres::PgConnection::connect(db_url).await {
+                    Ok(mut conn) => {
                         let result_json_value =
-                            execute_db_query_common(&pool, sql_query_from_ai, "globaldb").await;
+                            execute_db_query_common(&mut conn, sql_query_from_ai, "mevdb").await;
+                        if let Err(e) = conn.close().await {
+                            warn!(error = %e, tool = MEVDB_TOOL_NAME, "(mevdb_query_tool) failed to close database connection");
+                        }
                         Ok(result_json_value.to_string())
                     }
                     Err(e) => {
-                        error!(error = %e, tool = GLOBALDB_TOOL_NAME, "(globaldb_query_tool) failed to connect to database");
+                        error!(error = %e, tool = MEVDB_TOOL_NAME, "(mevdb_query_tool) failed to connect to database");
                         Ok(json!({
                             "status": "error",
-                            "message": "globaldb query tool failed to connect to its database.",
+                            "message": "mevdb query tool failed to connect to its database.",
                             "details": e.to_string()
                         })
                         .to_string())

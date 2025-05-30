@@ -28,9 +28,9 @@ pub struct OpenAiCallConfig {
 pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     let available_tools = vec![
         super::tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
-        super::tools::database_schema::DATABASE_SCHEMA_TOOL.clone(),
-        super::tools::mevdb_query::MEVDB_QUERY_TOOL.clone(),
-        super::tools::globaldb_query::GLOBALDB_QUERY_TOOL.clone(),
+        super::tools::db_schema::DATABASE_SCHEMA_TOOL.clone(),
+        super::tools::db_query::MEVDB_QUERY_TOOL.clone(),
+        super::tools::db_query::GLOBALDB_QUERY_TOOL.clone(),
         super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
         super::tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
     ];
@@ -102,12 +102,12 @@ async fn execute_tool_call(
 
     if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
         beacon_slot_check::execute_beacon_slot_check(ctx, arguments).await
-    } else if tool_name == database_schema::DATABASE_SCHEMA_TOOL_NAME {
-        database_schema::execute_get_database_schema(ctx, arguments).await
-    } else if tool_name == mevdb_query::MEVDB_TOOL_NAME {
-        mevdb_query::execute_mevdb_query_tool(ctx, arguments).await
-    } else if tool_name == globaldb_query::GLOBALDB_TOOL_NAME {
-        globaldb_query::execute_globaldb_query_tool(ctx, arguments).await
+    } else if tool_name == db_schema::DATABASE_SCHEMA_TOOL_NAME {
+        db_schema::execute_get_database_schema(ctx, arguments).await
+    } else if tool_name == db_query::MEVDB_TOOL_NAME {
+        db_query::execute_mevdb_query_tool(ctx, arguments).await
+    } else if tool_name == db_query::GLOBALDB_TOOL_NAME {
+        db_query::execute_globaldb_query_tool(ctx, arguments).await
     } else if tool_name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
         conversation_admin::execute_conversation_admin_command(ctx, arguments).await
     } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {

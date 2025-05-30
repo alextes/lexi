@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
 const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement_manual";
-const MANUALS_DIR_PATH: &str = "src/message_processor/tools/manuals/";
+const MANUALS_DIR_PATH: &str = "src/message_processor/tools/retrieve_manual/manuals/";
 
 #[derive(Debug, serde::Deserialize)]
 struct RetrieveManualArgs {

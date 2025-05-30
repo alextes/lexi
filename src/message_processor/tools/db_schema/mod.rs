@@ -13,8 +13,10 @@ use std::sync::LazyLock;
 use tracing::{error, info, warn};
 
 pub const DATABASE_SCHEMA_TOOL_NAME: &str = "get_database_schema";
-const MEVDB_SCHEMA_FILE_PATH: &str = "src/message_processor/tools/schemas/mevdb_schema.txt";
-const GLOBALDB_SCHEMA_FILE_PATH: &str = "src/message_processor/tools/schemas/globaldb_schema.txt";
+const MEVDB_SCHEMA_FILE_PATH: &str =
+    "src/message_processor/tools/db_schema/schemas/mevdb_schema.txt";
+const GLOBALDB_SCHEMA_FILE_PATH: &str =
+    "src/message_processor/tools/db_schema/schemas/globaldb_schema.txt";
 
 #[derive(Debug, serde::Deserialize)]
 struct GetDatabaseSchemaArgs {
