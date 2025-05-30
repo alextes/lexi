@@ -15,9 +15,11 @@ pub use mevdb_query::MEVDB_QUERY_TOOL;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::{types::BigDecimal, Column, Row, ValueRef, Executor};
 use tracing::{error, info};
+use tracing::instrument;
 
 // this function will be called by both mevdb_query and globaldb_query
 // it's now a public function within the db module.
+#[instrument(skip(executor, query), fields(tool_name = %tool_name, query = %query))]
 pub async fn execute_db_query_common<'c, E>(
     executor: E,
     query: &str,
@@ -26,7 +28,7 @@ pub async fn execute_db_query_common<'c, E>(
 where
     E: Executor<'c, Database = sqlx::Postgres>,
 {
-    info!(query = %query, tool = tool_name, "(db module) attempting to execute db query using provided executor"); // updated log origin
+    info!("attempting to execute db query using provided executor");
 
     match sqlx::query(query).fetch_all(executor).await {
         Ok(rows) => {
@@ -73,12 +75,11 @@ where
                                         row_idx
                                     );
                                 error!(
-                                    tool = tool_name,
                                     column_name,
                                     column_type_name = %column_type_info,
                                     row_idx,
                                     err_msg,
-                                    "(db module) data conversion error" // updated log origin
+                                    "(db module) data conversion error"
                                 );
                                 return json!({
                                     "status": "error",
@@ -96,7 +97,7 @@ where
                                 row_idx,
                                 e
                             );
-                            error!(tool = tool_name, column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "(db module) raw data retrieval error"); // updated log origin
+                            error!(column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "raw data retrieval error");
                             return json!({
                                 "status": "error",
                                 "message": "failed to retrieve data from database for a column.",
@@ -110,7 +111,7 @@ where
             json!(results)
         }
         Err(e) => {
-            error!(error = %e, query = %query, tool = tool_name, "(db module) failed to execute sql query"); // updated log origin
+            error!(error = %e, "failed to execute sql query");
             json!({
                 "status": "error",
                 "message": format!("failed to execute {} sql query.", tool_name),

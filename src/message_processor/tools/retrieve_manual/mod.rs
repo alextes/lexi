@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
 const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement";
@@ -46,6 +46,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
+#[instrument(fields(manual_name = %manual_name))]
 fn get_manual_content_from_file(manual_name: &str) -> Result<String> {
     let file_name = format!("{manual_name}.md");
     let file_path_str = format!("{MANUALS_DIR_PATH}{file_name}");
@@ -65,6 +66,7 @@ fn get_manual_content_from_file(manual_name: &str) -> Result<String> {
     })
 }
 
+#[instrument(skip(_ctx, arguments_json_str), fields(tool_name = RETRIEVE_MANUAL_TOOL_NAME))]
 pub async fn execute_retrieve_manual(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,

@@ -8,7 +8,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 use super::execute_db_query_common;
 
@@ -40,6 +40,7 @@ pub static GLOBALDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
+#[instrument(skip(_ctx, arguments_json_str), fields(tool_name = GLOBALDB_TOOL_NAME))]
 pub async fn execute_globaldb_query_tool(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,
@@ -69,7 +70,7 @@ pub async fn execute_globaldb_query_tool(
                         Ok(result_json_value.to_string())
                     }
                     Err(e) => {
-                        error!(error = %e, tool = GLOBALDB_TOOL_NAME, "(globaldb_query_tool) failed to connect to database");
+                        error!(error = %e, "failed to connect to database");
                         Ok(json!({
                             "status": "error",
                             "message": "globaldb query tool failed to connect to its database.",
@@ -80,7 +81,7 @@ pub async fn execute_globaldb_query_tool(
                 }
             } else {
                 let err_msg = "argument 'sql_query' missing";
-                warn!(args = %arguments_json_str, err_msg);
+                warn!(args = %arguments_json_str, %err_msg);
                 Ok(json!({
                     "status": "error",
                     "message": err_msg,

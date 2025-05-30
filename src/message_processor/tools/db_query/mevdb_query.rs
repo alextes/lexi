@@ -8,7 +8,7 @@ use serde_json::json;
 use sqlx::Connection;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 use super::execute_db_query_common;
 
@@ -40,6 +40,7 @@ pub static MEVDB_QUERY_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
+#[instrument(skip(_ctx, arguments_json_str), fields(tool_name = MEVDB_TOOL_NAME))]
 pub async fn execute_mevdb_query_tool(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,
@@ -67,12 +68,12 @@ pub async fn execute_mevdb_query_tool(
                         let result_json_value =
                             execute_db_query_common(&mut conn, sql_query_from_ai, "mevdb").await;
                         if let Err(e) = conn.close().await {
-                            warn!(error = %e, tool = MEVDB_TOOL_NAME, "(mevdb_query_tool) failed to close database connection");
+                            warn!(error = %e, "failed to close database connection");
                         }
                         Ok(result_json_value.to_string())
                     }
                     Err(e) => {
-                        error!(error = %e, tool = MEVDB_TOOL_NAME, "(mevdb_query_tool) failed to connect to database");
+                        error!(error = %e, "failed to connect to database");
                         Ok(json!({
                             "status": "error",
                             "message": "mevdb query tool failed to connect to its database.",
@@ -83,7 +84,7 @@ pub async fn execute_mevdb_query_tool(
                 }
             } else {
                 let err_msg = "argument 'sql_query' missing";
-                warn!(args = %arguments_json_str, err_msg);
+                warn!(args = %arguments_json_str, %err_msg);
                 Ok(json!({
                     "status": "error",
                     "message": err_msg,

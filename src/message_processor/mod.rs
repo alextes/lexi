@@ -1,4 +1,4 @@
-//! this module is responsible for the core ai conversation logic.
+//! core ai conversation logic module.
 //! it takes a user prompt and an optional previous openai response id, then drives the interaction
 //! with the openai api, including any necessary tool calls, until a final text response is generated.
 //! it is designed to be independent of the calling context (e.g., telegram, cli) and focuses solely
@@ -7,7 +7,7 @@
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use sqlx::PgPool; // still needed for HandlerContext as tools might use its pool field
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 use crate::openai_api::{
     call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
@@ -35,6 +35,7 @@ pub struct HandlerContext<'a> {
     pub openai_api_key: &'a str,
 }
 
+#[instrument(skip(ctx, prompt_text, previous_response_id), fields(logging_chat_id = %logging_chat_id))]
 pub async fn drive_ai_conversation(
     ctx: &HandlerContext<'_>,
     prompt_text: &str,
@@ -42,7 +43,7 @@ pub async fn drive_ai_conversation(
     previous_response_id: Option<&str>,
 ) -> Result<AiConversationOutcome> {
     info!(
-        logging_id = logging_chat_id, // Changed from chat_id to logging_id for clarity
+        // logging_id field is now part of the span
         prompt = prompt_text,
         has_previous_id = previous_response_id.is_some(),
         "driving conversation for prompt: '{}'",
@@ -73,25 +74,24 @@ pub async fn drive_ai_conversation(
     .await
     {
         Ok(api_response_1) => {
-            openai_chat::start_ai_processing_loop(ctx, logging_chat_id, api_response_1, input_items)
+            openai_chat::start_ai_processing_loop(ctx, api_response_1, input_items)
                 .await
                 .wrap_err("core ai conversation processing loop failed")
         }
         Err(e) => {
-            error!(logging_id = logging_chat_id, error = %e, "initial /v1/responses api call failed"); // Changed from chat_id
+            error!(error = %e, "initial /v1/responses api call failed");
             Err(e)
         }
     }
 }
 
+#[instrument(skip(ctx, prompt_text), fields(telegram_chat_id = %telegram_chat_id))]
 pub async fn process_single_prompt_for_cli(
     ctx: &HandlerContext<'_>,
     prompt_text: &str,
-    telegram_chat_id: i64, // Used as logging_chat_id
+    telegram_chat_id: i64,
 ) -> Result<(String, String)> {
-    // Return type remains (String, String) for CLI simplicity
     info!(
-        logging_id = telegram_chat_id,
         prompt = prompt_text,
         "processing single prompt via core ai driver"
     );
@@ -101,7 +101,7 @@ pub async fn process_single_prompt_for_cli(
             AiConversationOutcome::ResetConversation(message, response_id) => {
                 // For CLI, a reset doesn't mean much, so we'll just return the message and original ID.
                 // The user can be informed that a reset was requested.
-                info!(logging_id = telegram_chat_id, response_id = %response_id, "conversation reset was requested by ai/tool.");
+                info!(response_id = %response_id, "conversation reset was requested by ai/tool.");
                 Ok((
                     format!(
                         "(conversation reset requested by ai/tool, message: \"{}\")",

@@ -6,7 +6,7 @@ use reqwest::Client as ReqwestClient;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 pub const BEACON_SLOT_CHECK_TOOL_NAME: &str = "check_beacon_slot_missed";
 
@@ -40,6 +40,7 @@ impl SlotStatus {
     }
 }
 
+#[instrument(skip(http_client, beacon_node_url, slot), fields(slot = %slot))]
 async fn fetch_beacon_header(
     http_client: &ReqwestClient,
     beacon_node_url: &str,
@@ -76,6 +77,7 @@ async fn fetch_beacon_header(
     }
 }
 
+#[instrument(skip(ctx, arguments_json_str))]
 pub async fn execute_beacon_slot_check(
     ctx: &HandlerContext<'_>,
     arguments_json_str: &str, // The arguments string from OutputFunctionCall

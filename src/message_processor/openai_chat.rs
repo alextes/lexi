@@ -13,7 +13,7 @@ use crate::openai_api::{
 };
 use eyre::Result;
 use serde_json::Value as JsonValue;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 pub const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1";
 
@@ -91,6 +91,7 @@ fn parse_api_response_output(
 }
 
 /// executes a single tool function call based on its name.
+#[instrument(skip(ctx, fc_request), fields(tool_name = %fc_request.name))]
 async fn execute_tool_call(
     ctx: &super::HandlerContext<'_>,
     fc_request: &OutputFunctionCall,
@@ -113,10 +114,7 @@ async fn execute_tool_call(
     } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {
         retrieve_manual::execute_retrieve_manual(ctx, arguments).await
     } else {
-        warn!(
-            tool_name = tool_name,
-            "received unexpected tool name for execution"
-        );
+        warn!("received unexpected tool name for execution");
         Ok(format!(
             "{{\"error\": \"unexpected_tool_name\", \"tool_name\": \"{}\"}}",
             tool_name
@@ -126,10 +124,9 @@ async fn execute_tool_call(
 
 // processes the response from the openai api, handling direct messages or dispatching to tool handlers.
 // this is the core loop that handles sequences of api calls if tools are involved.
-#[tracing::instrument(skip_all, fields(chat_id = logging_chat_id))]
+#[instrument(skip_all)]
 pub(super) async fn process_openai_response_loop(
     ctx: &super::HandlerContext<'_>,
-    logging_chat_id: i64,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>,
@@ -273,13 +270,11 @@ pub(super) async fn process_openai_response_loop(
 
 pub async fn start_ai_processing_loop(
     ctx: &super::HandlerContext<'_>,
-    logging_chat_id: i64,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
 ) -> Result<AiConversationOutcome> {
     process_openai_response_loop(
         ctx,
-        logging_chat_id,
         initial_api_response,
         initial_input_items,
         OPENAI_CALL_CONFIG.available_tools.clone(),

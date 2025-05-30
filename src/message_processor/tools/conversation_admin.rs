@@ -7,7 +7,7 @@ use eyre::Result;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 pub const CONVERSATION_ADMIN_TOOL_NAME: &str = "conversation_admin_tool";
 const RESET_CONVERSATION_COMMAND_NAME: &str = "reset_conversation";
@@ -67,6 +67,7 @@ fn reset_conversation_impl() -> String {
     .to_string()
 }
 
+#[instrument(skip(_ctx, arguments_json_str))]
 pub async fn execute_conversation_admin_command(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,

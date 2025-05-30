@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 
 pub const DATABASE_SCHEMA_TOOL_NAME: &str = "get_database_schema";
 const MEVDB_SCHEMA_FILE_PATH: &str =
@@ -50,6 +50,7 @@ pub static DATABASE_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
+#[instrument(fields(db_name = %db_name, file_path = %file_path))]
 fn get_schema_from_file(file_path: &str, db_name: &str) -> Result<String> {
     info!(
         "attempting to read {} schema from file: {}",
@@ -61,6 +62,7 @@ fn get_schema_from_file(file_path: &str, db_name: &str) -> Result<String> {
     })
 }
 
+#[instrument(skip(_ctx, arguments_json_str))]
 pub async fn execute_get_database_schema(
     _ctx: &HandlerContext<'_>,
     arguments_json_str: &str,
