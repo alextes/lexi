@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use tracing::{error, info, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
-const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement_manual";
+const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement";
 const MANUALS_DIR_PATH: &str = "src/message_processor/tools/retrieve_manual/manuals/";
 
 #[derive(Debug, serde::Deserialize)]
@@ -25,7 +25,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         "manual_name".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement_manual' (explains how to generate a proposer reimbursement).",
+                "the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement' (explains how to generate a proposer reimbursement).",
             )
             .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME])
             .build(),
