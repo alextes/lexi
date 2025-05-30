@@ -37,7 +37,6 @@ jobs:
 
   check-schema:
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
       SQLX_OFFLINE: "true"
     services:
