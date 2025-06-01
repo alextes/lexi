@@ -10,3 +10,6 @@ when writing:
 4. function docs.
 5. module docs.
 write them all lowercase.
+things to never write lowercase:
+* special keywords in Dockerfile e.g. FROM, ENV, RUN
+* cli flags e.g. curl -S is not the same as -s
