@@ -14,7 +14,7 @@ RUN apt-get update && \
 WORKDIR /usr/src/app
 
 # copy manifests (cargo.toml, cargo.lock)
-COPY cargo.toml cargo.lock ./
+COPY Cargo.toml Cargo.lock ./
 
 # create a dummy main.rs to build and cache dependencies.
 # this layer will be rebuilt only if cargo.toml or cargo.lock changes.
