@@ -3,6 +3,7 @@ on: push
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: "true"
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
 name: check-lint-test
 
@@ -44,7 +45,6 @@ jobs:
         image: postgres
         env:
           POSTGRES_PASSWORD: postgres
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -152,5 +152,3 @@ jobs:
             ${{ runner.os }}-cargo-target-
 
       - run: cargo test -- --nocapture
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
