@@ -1,3 +1,15 @@
+//! this binary is the main entry point for the lexi telegram bot.
+//!
+//! it is responsible for:
+//! - initializing the application environment (configuration, logging, database connections, http client).
+//! - performing initial setup, such as fetching and storing the bot's own user details.
+//! - launching the main bot event loop (`lexi::bot::r#loop::run_bot_loop`), which listens for
+//!   and processes incoming telegram updates.
+//!
+//! the core bot logic, including message handling and ai interaction, is delegated to
+//! modules within the `lexi::bot` and `lexi::message_processor` crates/modules.
+//! this file lives at `src/bin/run_tg_bot.rs`.
+
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use std::env;

@@ -18,16 +18,16 @@ COPY Cargo.toml Cargo.lock ./
 
 # create a dummy main.rs to build and cache dependencies.
 # this layer will be rebuilt only if cargo.toml or cargo.lock changes.
-RUN mkdir src && \
-    echo "fn main() {println!(\"building_dependencies...\");}" > src/main.rs
+RUN mkdir -p src/bin && \
+    echo "fn main() {println!(\"building_dependencies_bin...\");}" > src/bin/run_tg_bot.rs
 
 # build dependencies.
 # this step assumes the package name in cargo.toml (and thus the default binary name
-# for this dummy build) is 'lexi'. if it's different, adjust 'lexi' in the rm command below.
-# your_crate_name should be replaced with the actual crate name if not 'lexi'.
+# for this dummy build) is 'run_tg_bot'. if it's different, adjust 'run_tg_bot' in the rm command below.
+# your_crate_name should be replaced with the actual crate name if not 'run_tg_bot'.
 ENV SQLX_OFFLINE=true
-RUN cargo build --release --locked && \
-    rm -f target/release/lexi # remove the dummy executable (adjust 'lexi' if your_crate_name is different), retain dependencies.
+RUN cargo build --release --locked --bin run_tg_bot && \
+    rm -f target/release/run_tg_bot # remove the dummy executable (adjust 'run_tg_bot' if your_crate_name is different), retain dependencies.
 
 # copy the rest of the application source code.
 # remove the dummy src directory first to prevent conflicts.
@@ -36,10 +36,10 @@ COPY . . # copies src/, migrations/, sqlx-data.json (if present), etc.
 
 # build the application binary.
 # sqlx_offline=true is inherited, ensuring build uses checked-in sqlx-data.json.
-# adjust 'lexi' if your final binary name is different. the actual binary name will be
+# adjust 'run_tg_bot' if your final binary name is different. the actual binary name will be
 # determined by your cargo.toml ([package].name or [[bin]].name).
-# your_crate_name should be replaced with the actual crate name if not 'lexi'.
-RUN cargo build --release --locked
+# your_crate_name should be replaced with the actual crate name if not 'run_tg_bot'.
+RUN cargo build --release --locked --bin run_tg_bot
 
 # ---- runtime stage ----
 # use a slim base image for a smaller footprint.
@@ -55,9 +55,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # copy the compiled binary from the builder stage.
-# important: adjust 'lexi' to your actual binary name (your_crate_name).
+# important: adjust 'run_tg_bot' to your actual binary name (your_crate_name).
 # this is typically the package name from cargo.toml, unless overridden.
-COPY --from=builder /usr/src/app/target/release/lexi .
+COPY --from=builder /usr/src/app/target/release/run_tg_bot .
 
 # set default environment variables.
 # rust_log controls logging verbosity (e.g., info, debug, trace).
@@ -73,8 +73,8 @@ RUN groupadd --system --gid 1001 appgroup && \
 USER appuser
 
 # define the command to run the application.
-# important: adjust 'lexi' to your actual binary name (your_crate_name).
-CMD ["./lexi"]
+# important: adjust 'run_tg_bot' to your actual binary name (your_crate_name).
+CMD ["./run_tg_bot"]
 
 # expose any ports the application listens on.
 # for many bots, this is not needed as they connect outwards.

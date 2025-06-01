@@ -7,8 +7,8 @@ edition = "2021"
 name = "lexi"
 
 [[bin]]
-name = "lexi"
-path = "src/bin/lexi.rs"
+name = "run_tg_bot"
+path = "src/bin/run_tg_bot.rs"
 
 [[bin]]
 name = "ai_tool_cli"
