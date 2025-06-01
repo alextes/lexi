@@ -1,0 +1,17 @@
+# ignore git directory
+.git
+
+# ignore build artifacts and dependencies (they are handled in the builder stage)
+/target
+
+# ignore local ide/editor configuration
+.idea
+.vscode
+.cursor
+
+# ignore local environment files if any (should use docker env variables)
+.env
+
+# ignore os-specific files
+.ds_store
+thumbs.db 
