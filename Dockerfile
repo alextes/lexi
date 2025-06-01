@@ -25,7 +25,7 @@ RUN mkdir src && \
 # this step assumes the package name in cargo.toml (and thus the default binary name
 # for this dummy build) is 'lexi'. if it's different, adjust 'lexi' in the rm command below.
 # your_crate_name should be replaced with the actual crate name if not 'lexi'.
-ENV SQLX_OFFLINE=true # match ci practice, assumes sqlx-data.json is available
+ENV SQLX_OFFLINE=true
 RUN cargo build --release --locked && \
     rm -f target/release/lexi # remove the dummy executable (adjust 'lexi' if your_crate_name is different), retain dependencies.
 
