@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # required for pushing to ghcr.io if you switch, not for docker hub
 
     steps:
       - name: checkout repository
