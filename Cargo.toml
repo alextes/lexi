@@ -3,9 +3,6 @@ name = "lexi"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "lexi"
-
 [[bin]]
 name = "run_tg_bot"
 path = "src/bin/run_tg_bot.rs"

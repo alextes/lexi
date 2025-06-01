@@ -32,7 +32,9 @@ RUN cargo build --release --locked --bin run_tg_bot && \
 # copy the rest of the application source code.
 # remove the dummy src directory first to prevent conflicts.
 RUN rm -rf src
-COPY . . # copies src/, migrations/, sqlx-data.json (if present), etc.
+COPY src ./src
+COPY migrations ./migrations
+COPY .sqlx ./.sqlx
 
 # build the application binary.
 # sqlx_offline=true is inherited, ensuring build uses checked-in sqlx-data.json.
@@ -69,7 +71,7 @@ ENV RUST_LOG="debug,reqwest=info,hyper_util=info,sqlx=warn"
 # running as non-root is a best practice.
 RUN groupadd --system --gid 1001 appgroup && \
     useradd --system --uid 1001 --gid appgroup --create-home appuser && \
-    chown -r appuser:appgroup /app
+    chown -R appuser:appgroup /app
 USER appuser
 
 # define the command to run the application.
