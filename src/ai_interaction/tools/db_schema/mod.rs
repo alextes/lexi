@@ -6,15 +6,12 @@ use crate::openai_api::{
 use eyre::Result;
 use serde_json::json;
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use std::sync::LazyLock;
 use tracing::{error, info, instrument, warn};
 
 pub const DATABASE_SCHEMA_TOOL_NAME: &str = "get_database_schema";
-const MEVDB_SCHEMA_FILE_PATH: &str = "src/ai_interaction/tools/db_schema/schemas/mevdb_schema.txt";
-const GLOBALDB_SCHEMA_FILE_PATH: &str =
-    "src/ai_interaction/tools/db_schema/schemas/globaldb_schema.txt";
+const MEVDB_SCHEMA_CONTENT: &str = include_str!("./schemas/mevdb_schema.txt");
+const GLOBALDB_SCHEMA_CONTENT: &str = include_str!("./schemas/globaldb_schema.txt");
 
 #[derive(Debug, serde::Deserialize)]
 struct GetDatabaseSchemaArgs {
@@ -48,16 +45,20 @@ pub static DATABASE_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-#[instrument(fields(db_name = %db_name, file_path = %file_path))]
-fn get_schema_from_file(file_path: &str, db_name: &str) -> Result<String> {
-    info!(
-        "attempting to read {} schema from file: {}",
-        db_name, file_path
-    );
-    fs::read_to_string(Path::new(file_path)).map_err(|e| {
-        error!(error = %e, path = file_path, "failed to read {} schema file", db_name);
-        eyre::eyre!("failed to read {} schema file: {}", db_name, e)
-    })
+#[instrument(fields(db_name = %db_name))]
+fn get_schema_content(db_name: &str) -> Result<String> {
+    info!("retrieving {} schema content", db_name);
+    // instead of reading from a file, we return the embedded content
+    match db_name {
+        "mevdb" => Ok(MEVDB_SCHEMA_CONTENT.to_string()),
+        "globaldb" => Ok(GLOBALDB_SCHEMA_CONTENT.to_string()),
+        _ => {
+            // this case should ideally be caught before calling this function,
+            // but as a safeguard:
+            error!("invalid database name {} for schema retrieval", db_name);
+            eyre::bail!("invalid database name for schema retrieval: {}", db_name)
+        }
+    }
 }
 
 #[instrument(skip(arguments_json_str))]
@@ -69,9 +70,9 @@ pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<Str
 
     match serde_json::from_str::<GetDatabaseSchemaArgs>(arguments_json_str) {
         Ok(args) => {
-            let schema_file_path = match args.database_name.as_str() {
-                "mevdb" => MEVDB_SCHEMA_FILE_PATH,
-                "globaldb" => GLOBALDB_SCHEMA_FILE_PATH,
+            let schema_content_result = match args.database_name.as_str() {
+                "mevdb" => get_schema_content("mevdb"),
+                "globaldb" => get_schema_content("globaldb"),
                 _ => {
                     warn!(db_name = %args.database_name, "invalid database name provided");
                     return Ok(json!({
@@ -82,7 +83,7 @@ pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<Str
                 }
             };
 
-            match get_schema_from_file(schema_file_path, &args.database_name) {
+            match schema_content_result {
                 Ok(s) => Ok(s),
                 Err(e) => {
                     warn!(db_name = %args.database_name, error = %e, "error getting schema for tool call");
@@ -112,26 +113,15 @@ pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<Str
 mod tests {
     use super::*;
     use serde_json::Value as JsonValue;
-    use std::fs;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    // helper to create a temporary schema file for testing get_schema_from_file
-    fn create_temp_schema_file(content: &str) -> NamedTempFile {
-        let mut temp_file = NamedTempFile::new().unwrap();
-        writeln!(temp_file, "{}", content).unwrap();
-        temp_file
-    }
 
     #[tokio::test]
     async fn test_execute_get_database_schema_mevdb_success() {
         let args = json!({ "database_name": "mevdb" }).to_string();
 
-        let expected_content = fs::read_to_string(MEVDB_SCHEMA_FILE_PATH).unwrap_or_default();
+        // the expected content is now directly from the embedded string
+        let expected_content = MEVDB_SCHEMA_CONTENT;
         if expected_content.is_empty() {
-            println!(
-                "warning: mevdb schema file is empty or not found, test might not be meaningful."
-            );
+            println!("warning: mevdb schema content is empty, test might not be meaningful.");
         }
 
         let result_str = execute_get_database_schema(&args).await.unwrap();
@@ -142,9 +132,10 @@ mod tests {
     async fn test_execute_get_database_schema_globaldb_success() {
         let args = json!({ "database_name": "globaldb" }).to_string();
 
-        let expected_content = fs::read_to_string(GLOBALDB_SCHEMA_FILE_PATH).unwrap_or_default();
+        // the expected content is now directly from the embedded string
+        let expected_content = GLOBALDB_SCHEMA_CONTENT;
         if expected_content.is_empty() {
-            println!("warning: globaldb schema file is empty or not found, test might not be meaningful.");
+            println!("warning: globaldb schema content is empty, test might not be meaningful.");
         }
 
         let result_str = execute_get_database_schema(&args).await.unwrap();
@@ -188,20 +179,27 @@ mod tests {
     }
 
     // test for the private helper get_schema_from_file
+    // these tests need to be adapted or removed as get_schema_from_file has changed to get_schema_content
+    // and no longer deals with file paths.
     #[test]
-    fn test_get_schema_from_file_success() {
-        let content = "test schema content here";
-        let temp_file = create_temp_schema_file(content);
-        let result = get_schema_from_file(temp_file.path().to_str().unwrap(), "testdb");
+    fn test_get_schema_content_success_mevdb() {
+        let result = get_schema_content("mevdb");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), format!("{}\n", content));
+        assert_eq!(result.unwrap(), MEVDB_SCHEMA_CONTENT.to_string());
     }
 
     #[test]
-    fn test_get_schema_from_file_not_found() {
-        let result = get_schema_from_file("path/to/nonexistent/schema.txt", "testdb");
+    fn test_get_schema_content_success_globaldb() {
+        let result = get_schema_content("globaldb");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), GLOBALDB_SCHEMA_CONTENT.to_string());
+    }
+
+    #[test]
+    fn test_get_schema_content_invalid_db() {
+        let result = get_schema_content("nonexistentdb");
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("failed to read testdb schema file"));
+        assert!(err_msg.contains("invalid database name for schema retrieval: nonexistentdb"));
     }
 }
