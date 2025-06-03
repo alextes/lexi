@@ -8,12 +8,8 @@ name = "run_tg_bot"
 path = "src/bin/run_tg_bot.rs"
 
 [[bin]]
-name = "ai_tool_cli"
-path = "src/bin/ai_tool_cli.rs"
-
-[[bin]]
-name = "message_processor_cli"
-path = "src/bin/message_processor_cli.rs"
+name = "chat_cli"
+path = "src/bin/chat_cli.rs"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
