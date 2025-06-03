@@ -27,7 +27,6 @@ pub enum AiConversationOutcome {
     ResetConversation(String, String),
 }
 
-// #[derive(Clone)]
 pub struct HandlerContext<'a, D: Db> {
     pub db: D,
     pub http_client: &'a ReqwestClient,
