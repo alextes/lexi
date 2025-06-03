@@ -6,9 +6,9 @@
 FROM rust:bullseye AS builder
 # alternative: from rust:latest as builder if you always want the newest rust.
 
-# install system dependencies required for building (e.g., for postgresql client - pq-sys).
+# install system dependencies required for building.
 RUN apt-get update && \
-    apt-get install -y libpq-dev pkg-config build-essential && \
+    apt-get install -y pkg-config build-essential libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
