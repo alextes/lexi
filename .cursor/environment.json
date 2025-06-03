@@ -4,6 +4,6 @@
   "start": "cargo check",
   "build": {
     "context": ".",
-    "dockerfile": "Dockerfile.agent"
+    "dockerfile": "Dockerfile"
   }
 }
