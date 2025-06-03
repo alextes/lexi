@@ -1,6 +1,6 @@
+use crate::ai_interaction::HandlerContext;
 use crate::db::Db;
 use crate::env::ENV_CONFIG;
-use crate::message_processor::HandlerContext;
 use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
 use eyre::{eyre, Context, Result};
 use reqwest::Client as ReqwestClient;

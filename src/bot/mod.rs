@@ -1,20 +1,20 @@
 //! this module handles the core logic for the telegram bot's operation.
 //! it acts as an intermediary between raw telegram updates (received by `bot::r#loop`)
-//! and the ai message processing logic (handled by `message_processor`).
+//! and the ai interaction logic (handled by `ai_interaction`).
 //!
 //! responsibilities include:
 //! - parsing incoming telegram messages.
 //! - determining if and how the bot should respond (e.g., based on mentions or private chat).
 //! - extracting the prompt for the ai.
 //! - managing database interactions for telegram-specific entities (users, chats, messages).
-//! - orchestrating the call to the `message_processor` to get an ai-generated reply.
+//! - orchestrating the call to the `ai_interaction` to get an ai-generated reply.
 //! - sending the final reply back to the telegram user.
 //! - maintaining conversation context by storing relevant openai response ids in the database.
 
 pub mod r#loop;
 
+use crate::ai_interaction;
 use crate::db::Db;
-use crate::message_processor;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use eyre::{Context, Result};
@@ -268,14 +268,14 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     }
                 };
 
-                let mp_ctx = message_processor::HandlerContext {
+                let mp_ctx = ai_interaction::HandlerContext {
                     db: ctx.db.clone(),
                     http_client: &ctx.http_client,
                     bot_db_id: ctx.bot_db_id,
                     openai_api_key: ctx.openai_api_key,
                 };
 
-                match message_processor::drive_ai_conversation(
+                match ai_interaction::drive_ai_conversation(
                     &mp_ctx,
                     &prompt_text,
                     incoming_message.chat.id,
@@ -284,7 +284,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 .await
                 {
                     Ok(ai_outcome) => match ai_outcome {
-                        message_processor::AiConversationOutcome::TextMessage(
+                        ai_interaction::AiConversationOutcome::TextMessage(
                             final_text,
                             response_id_to_store,
                         ) => {
@@ -297,7 +297,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             )
                             .await?;
                         }
-                        message_processor::AiConversationOutcome::ResetConversation(
+                        ai_interaction::AiConversationOutcome::ResetConversation(
                             confirmation_json_str,
                             _response_id,
                         ) => {

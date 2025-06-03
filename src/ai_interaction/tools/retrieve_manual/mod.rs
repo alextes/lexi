@@ -1,6 +1,6 @@
 //! tools for retrieving manuals from the filesystem
 //!
-//! manuals are stored in the `src/message_processor/tools/retrieve_manual/manuals` directory
+//! manuals are stored in the `src/ai_interaction/tools/retrieve_manual/manuals` directory
 //! and are named like `generate_proposer_reimbursement.md`
 //!
 //! the tool is used to retrieve the content of a manual for the assistant to use
@@ -18,7 +18,7 @@ use tracing::{error, info, instrument, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
 const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement";
-const MANUALS_DIR_PATH: &str = "src/message_processor/tools/retrieve_manual/manuals/";
+const MANUALS_DIR_PATH: &str = "src/ai_interaction/tools/retrieve_manual/manuals/";
 
 #[derive(Debug, serde::Deserialize)]
 struct RetrieveManualArgs {

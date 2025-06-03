@@ -1,4 +1,4 @@
-// this is the new src/message_processor/tools/db/mod.rs
+// this is the new src/ai_interaction/tools/db_query/mod.rs
 
 // declare the submodules first, standard practice
 mod globaldb_query;

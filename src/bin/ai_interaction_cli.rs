@@ -1,5 +1,5 @@
-//! this cli application provides a way to test the core ai message processing logic
-//! (`message_processor::process_single_prompt_for_cli` which delegates to `openai_chat`)
+//! this cli application provides a way to test the core ai interaction logic
+//! (`ai_interaction::process_single_prompt_for_cli` which delegates to `openai_chat`)
 //! directly from the command line, bypassing the full telegram bot loop and database interactions
 //! for conversation history. it takes a text prompt as input and outputs the ai's final response.
 //! this is useful for quick iterative testing of the ai's capabilities, tool usage, and prompt handling
@@ -7,18 +7,18 @@
 
 use clap::Parser;
 use eyre::{Context, Result};
+use lexi::ai_interaction::{self, HandlerContext as AiInteractionHandlerContext}; // Aliasing for clarity
 use lexi::env::ENV_CONFIG;
 use lexi::log;
-use lexi::message_processor::{self, HandlerContext as MessageProcessorHandlerContext}; // Aliasing for clarity
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{error, info};
 
 // Default IDs for testing if not provided or if we simplify context creation
-const DEFAULT_TEST_CHAT_ID: i64 = 12345; // Telegram chat ID for logging/context in message_processor
+const DEFAULT_TEST_CHAT_ID: i64 = 12345; // Telegram chat ID for logging/context in ai_interaction
 const DEFAULT_BOT_DB_ID: i32 = -1; // Placeholder for HandlerContext
 
-/// a cli to test the `message_processor` and ai tool usage.
+/// a cli to test the `ai_interaction` and ai tool usage.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
@@ -26,7 +26,7 @@ struct CliArgs {
     prompt: String,
 
     #[clap(long, default_value_t = DEFAULT_TEST_CHAT_ID)]
-    logging_chat_id: i64, // Renamed to reflect its purpose more accurately for message_processor
+    logging_chat_id: i64, // Renamed to reflect its purpose more accurately for ai_interaction
 }
 
 #[tokio::main]
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     log::init();
 
-    info!("message_processor_cli starting...");
+    info!("ai_interaction_cli starting...");
 
     let cli = CliArgs::parse();
 
@@ -54,8 +54,8 @@ async fn main() -> Result<()> {
     let openai_api_key =
         std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set, it is required.")?;
 
-    // Create the simplified HandlerContext for message_processor
-    let mp_handler_ctx = MessageProcessorHandlerContext {
+    // Create the simplified HandlerContext for ai_interaction
+    let ai_interaction_handler_ctx = AiInteractionHandlerContext {
         db,
         http_client: &http_client,
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
@@ -63,13 +63,13 @@ async fn main() -> Result<()> {
     };
 
     info!(
-        "Calling message_processor::process_single_prompt_for_cli with prompt: '{}', logging_chat_id: {}",
+        "Calling ai_interaction::process_single_prompt_for_cli with prompt: '{}', logging_chat_id: {}",
         cli.prompt,
         cli.logging_chat_id
     );
 
-    match message_processor::process_single_prompt_for_cli(
-        &mp_handler_ctx,
+    match ai_interaction::process_single_prompt_for_cli(
+        &ai_interaction_handler_ctx,
         &cli.prompt,
         cli.logging_chat_id,
     )
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
             println!("final text:\n{final_text}");
         }
         Err(e) => {
-            error!(error = %e, "error during ai processing with message_processor::process_single_prompt_for_cli");
+            error!(error = %e, "error during ai processing with ai_interaction::process_single_prompt_for_cli");
             eprintln!("error during ai processing: {e:?}");
         }
     }
