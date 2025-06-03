@@ -1,0 +1,5 @@
+{
+  "agentCanUpdateSnapshot": true,
+  "install": "cargo build",
+  "start": "cargo check"
+}
