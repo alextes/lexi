@@ -6,3 +6,5 @@ FROM rust:bullseye
 # install system dependencies required for building (e.g., for postgresql client - pq-sys).
 RUN apt-get update && \
     apt-get install -y pkg-config build-essential libssl-dev
+
+RUN cargo build
