@@ -14,6 +14,7 @@
 pub mod r#loop;
 
 use crate::ai_interaction;
+use crate::ai_interaction::beacon_node::BeaconNodeHttp;
 use crate::db::Db;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
@@ -268,11 +269,26 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     }
                 };
 
+                let beacon_url_for_handler = match crate::env::ENV_CONFIG.beacon_url.clone() {
+                    Some(url) => url,
+                    None => {
+                        warn!("BEACON_URL is not set in ENV_CONFIG, beacon-dependent tools will fail.");
+                        String::new() // Default to empty string if not set
+                    }
+                };
+
+                // Define relay admin base url. todo: consider moving to env.rs or a shared const.
+                let relay_admin_url_for_handler =
+                    "https://relay.ultrasound.money/ultrasound/v1/admin".to_string();
+
                 let mp_ctx = ai_interaction::HandlerContext {
                     db: ctx.db.clone(),
                     http_client: &ctx.http_client,
                     bot_db_id: ctx.bot_db_id,
                     openai_api_key: ctx.openai_api_key,
+                    beacon_base_url: beacon_url_for_handler.clone(),
+                    relay_admin_base_url: relay_admin_url_for_handler,
+                    beacon_node: BeaconNodeHttp::new(beacon_url_for_handler),
                 };
 
                 match ai_interaction::drive_ai_conversation(

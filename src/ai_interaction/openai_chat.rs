@@ -6,7 +6,7 @@
 //! this allows it to be used by different entry points, such as the main telegram bot loop
 //! or a command-line interface for testing.
 
-use super::AiConversationOutcome;
+use super::{AiConversationOutcome, BeaconNode};
 use crate::{
     db::Db,
     openai_api::{
@@ -102,8 +102,8 @@ fn parse_api_response_output(
 
 /// executes a single tool function call based on its name.
 #[instrument(skip(ctx, fc_request), fields(tool_name = %fc_request.name))]
-async fn execute_tool_call<D: Db>(
-    ctx: &super::HandlerContext<'_, D>,
+async fn execute_tool_call<D: Db, B: BeaconNode>(
+    ctx: &super::HandlerContext<'_, D, B>,
     fc_request: &OutputFunctionCall,
 ) -> Result<String> {
     use super::tools::*;
@@ -112,7 +112,7 @@ async fn execute_tool_call<D: Db>(
     let arguments = &fc_request.arguments;
 
     if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
-        beacon_slot_check::execute_beacon_slot_check(ctx, arguments).await
+        beacon_slot_check::execute_beacon_slot_check(arguments, &ctx.beacon_node).await
     } else if tool_name == db_schema::DATABASE_SCHEMA_TOOL_NAME {
         db_schema::execute_get_database_schema(arguments).await
     } else if tool_name == db_query::MEVDB_TOOL_NAME {
@@ -135,8 +135,8 @@ async fn execute_tool_call<D: Db>(
 // processes the response from the openai api, handling direct messages or dispatching to tool handlers.
 // this is the core loop that handles sequences of api calls if tools are involved.
 #[instrument(skip_all)]
-pub(super) async fn process_openai_response_loop<D: Db>(
-    ctx: &super::HandlerContext<'_, D>,
+pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
+    ctx: &super::HandlerContext<'_, D, B>,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>,
@@ -278,8 +278,8 @@ pub(super) async fn process_openai_response_loop<D: Db>(
     }
 }
 
-pub async fn start_ai_processing_loop<D: Db>(
-    ctx: &super::HandlerContext<'_, D>,
+pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
+    ctx: &super::HandlerContext<'_, D, B>,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
 ) -> Result<AiConversationOutcome> {

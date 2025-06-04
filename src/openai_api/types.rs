@@ -53,6 +53,11 @@ impl ToolFunctionParameterPropertyBuilder {
     }
 
     #[must_use]
+    pub fn new_boolean() -> Self {
+        Self::new("boolean")
+    }
+
+    #[must_use]
     pub fn integer() -> Self {
         Self::new("integer")
     }

@@ -14,8 +14,11 @@ use crate::openai_api::{
 };
 use openai_chat::{OPENAI_CALL_CONFIG, OPENAI_RESPONSES_MODEL_ID};
 
+pub mod beacon_node;
 pub mod openai_chat;
 pub mod tools;
+
+use beacon_node::BeaconNode;
 
 /// represents the outcome of an ai conversation cycle.
 pub enum AiConversationOutcome {
@@ -27,16 +30,19 @@ pub enum AiConversationOutcome {
     ResetConversation(String, String),
 }
 
-pub struct HandlerContext<'a, D: Db> {
+pub struct HandlerContext<'a, D: Db, B: BeaconNode> {
     pub db: D,
     pub http_client: &'a ReqwestClient,
     pub bot_db_id: i32, // kept as some tools/logging might still reference it via context
     pub openai_api_key: &'a str,
+    pub beacon_base_url: String,      // Added for beacon node base URL
+    pub relay_admin_base_url: String, // Added for relay admin base URL
+    pub beacon_node: B,
 }
 
 #[instrument(skip(ctx, prompt_text, previous_response_id), fields(logging_chat_id = %logging_chat_id))]
-pub async fn drive_ai_conversation<D: Db>(
-    ctx: &HandlerContext<'_, D>,
+pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
+    ctx: &HandlerContext<'_, D, B>,
     prompt_text: &str,
     logging_chat_id: i64, // This is used for logging within openai_chat and its tools
     previous_response_id: Option<&str>,
@@ -85,8 +91,8 @@ pub async fn drive_ai_conversation<D: Db>(
 }
 
 #[instrument(skip(ctx, prompt_text), fields(telegram_chat_id = %telegram_chat_id))]
-pub async fn process_single_prompt_for_cli<D: Db>(
-    ctx: &HandlerContext<'_, D>,
+pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
+    ctx: &HandlerContext<'_, D, B>,
     prompt_text: &str,
     telegram_chat_id: i64,
 ) -> Result<(String, String)> {

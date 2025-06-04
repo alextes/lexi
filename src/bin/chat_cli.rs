@@ -7,6 +7,7 @@
 
 use clap::Parser;
 use eyre::{Context, Result};
+use lexi::ai_interaction::beacon_node::BeaconNodeHttp;
 use lexi::ai_interaction::{self, HandlerContext as AiInteractionHandlerContext}; // Aliasing for clarity
 use lexi::env::ENV_CONFIG;
 use lexi::log;
@@ -60,6 +61,13 @@ async fn main() -> Result<()> {
         http_client: &http_client,
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
         openai_api_key: &openai_api_key,
+        beacon_base_url: ENV_CONFIG.beacon_url.clone().unwrap_or_default(),
+        beacon_node: BeaconNodeHttp::new(
+            ENV_CONFIG
+                .beacon_url
+                .clone()
+                .expect("BEACON_URL is required in env config."),
+        ),
     };
 
     info!(

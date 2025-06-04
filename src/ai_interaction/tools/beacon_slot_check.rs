@@ -1,21 +1,19 @@
-use crate::ai_interaction::HandlerContext;
-use crate::db::Db;
-use crate::env::ENV_CONFIG;
+use crate::ai_interaction::beacon_node::BeaconNode;
 use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
-use eyre::{eyre, Context, Result};
-use reqwest::Client as ReqwestClient;
+use eyre::Result;
+use reqwest::StatusCode;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 pub const BEACON_SLOT_CHECK_TOOL_NAME: &str = "check_beacon_slot_missed";
 
 #[derive(Debug)]
-pub enum SlotStatus {
-    NotMissed,     // Slot had a block header
-    Missed,        // Slot was missed (404)
-    Error(String), // Error during check
+enum SlotStatus {
+    NotMissed,
+    Missed,
+    Error(String),
 }
 
 impl SlotStatus {
@@ -41,91 +39,70 @@ impl SlotStatus {
     }
 }
 
-#[instrument(skip(http_client, beacon_node_url, slot), fields(slot = %slot))]
-async fn fetch_beacon_header(
-    http_client: &ReqwestClient,
-    beacon_node_url: &str,
-    slot: u64,
-) -> Result<SlotStatus> {
-    let request_url = format!("{beacon_node_url}/eth/v1/beacon/headers/{slot}");
-    info!(url = %request_url, "fetching beacon header for slot");
-
-    match http_client.get(&request_url).send().await {
-        Ok(response) => {
-            let status = response.status();
-            if status.is_success() {
-                // we don't need to parse the body, just knowing it's 200 is enough
-                info!(slot = slot, "beacon slot not missed (200 ok)");
-                Ok(SlotStatus::NotMissed)
-            } else if status == reqwest::StatusCode::NOT_FOUND {
-                info!(slot = slot, "beacon slot missed (404 not found)");
-                Ok(SlotStatus::Missed)
-            } else {
-                let err_text = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "failed to get error body".to_string());
-                warn!(slot = slot, status = %status, body = %err_text, "error response from beacon node");
-                Ok(SlotStatus::Error(format!(
-                    "beacon node returned status {status} - {err_text}"
-                )))
-            }
-        }
-        Err(e) => {
-            error!(slot = slot, error = %e, "failed to send request to beacon node");
-            Err(eyre!(e)).context("failed to connect to beacon node")
-        }
-    }
-}
-
-#[instrument(skip(ctx, arguments_json_str))]
-pub async fn execute_beacon_slot_check<D: Db>(
-    ctx: &HandlerContext<'_, D>,
-    arguments_json_str: &str, // The arguments string from OutputFunctionCall
-) -> Result<String> {
-    // Returns a JSON string (SlotStatus or error)
-    info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
-
-    let beacon_node_url = if let Some(url) = ENV_CONFIG.beacon_url.as_ref() {
-        url.as_str()
-    } else {
-        let err_msg = "BEACON_URL environment variable not set. cannot check beacon slot.";
-        error!(err_msg);
-        return Ok(SlotStatus::Error(err_msg.to_string()).to_json_string());
-    };
-
+fn parse_slot_number_arg(arguments_json_str: &str) -> Result<u64, String> {
     match serde_json::from_str::<HashMap<String, JsonValue>>(arguments_json_str) {
         Ok(args_map) => {
             if let Some(slot_value) = args_map.get("slot_number") {
                 if let Some(slot_number) = slot_value.as_u64() {
-                    info!(slot = slot_number, "checking beacon slot from ai request");
-                    match fetch_beacon_header(ctx.http_client, beacon_node_url, slot_number).await {
-                        Ok(status) => Ok(status.to_json_string()),
-                        Err(e) => {
-                            warn!(slot = slot_number, error = %e, "error fetching beacon header");
-                            Ok(
-                                SlotStatus::Error(format!(
-                                    "error checking slot {slot_number}: {e}"
-                                ))
-                                .to_json_string(),
-                            )
-                        }
-                    }
+                    Ok(slot_number)
                 } else {
-                    let err_msg = "argument 'slot_number' was not a valid u64";
-                    warn!(args = %arguments_json_str, err_msg);
-                    Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
+                    Err("argument 'slot_number' was not a valid u64".to_string())
                 }
             } else {
-                let err_msg = "argument 'slot_number' missing";
-                warn!(args = %arguments_json_str, err_msg);
-                Ok(SlotStatus::Error(err_msg.to_string()).to_json_string())
+                Err("argument 'slot_number' missing".to_string())
             }
         }
-        Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {e}");
-            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
-            Ok(SlotStatus::Error(err_msg).to_json_string())
+        Err(e) => Err(format!("failed to parse arguments json: {e}")),
+    }
+}
+
+#[instrument(skip(arguments_json_str, beacon_node))]
+pub async fn execute_beacon_slot_check<BN: BeaconNode + ?Sized>(
+    arguments_json_str: &str,
+    beacon_node: &BN,
+) -> Result<String> {
+    info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
+
+    match parse_slot_number_arg(arguments_json_str) {
+        Ok(slot_number) => {
+            info!(slot = slot_number, "querying beacon node for slot status");
+            match beacon_node.slot_status(slot_number).await {
+                Ok(status_code) => {
+                    let internal_status = if status_code == StatusCode::OK {
+                        SlotStatus::NotMissed
+                    } else if status_code == StatusCode::NOT_FOUND {
+                        SlotStatus::Missed
+                    } else {
+                        SlotStatus::Error(format!(
+                            "beacon node responded with http status: {}",
+                            status_code
+                        ))
+                    };
+                    Ok(internal_status.to_json_string())
+                }
+                Err(e) => {
+                    warn!(slot = slot_number, error = %e, "beacon_node.slot_status call failed");
+                    let internal_status = SlotStatus::Error(format!(
+                        "failed to query beacon node for slot {}: {}",
+                        slot_number, e
+                    ));
+                    Ok(internal_status.to_json_string())
+                }
+            }
+        }
+        Err(err_detail) => {
+            let err_message_key = if err_detail.starts_with("failed to parse arguments json") {
+                "argument_parsing_error"
+            } else {
+                "invalid_argument"
+            };
+            warn!(args = %arguments_json_str, error = %err_detail, "argument parsing failed");
+            Ok(json!({
+                "status": "error",
+                "message": err_message_key,
+                "details": err_detail
+            })
+            .to_string())
         }
     }
 }
@@ -159,53 +136,195 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::Client as ReqwestClient;
+    use crate::ai_interaction::beacon_node::MockBeaconNode;
+    use eyre::eyre;
+    use reqwest::StatusCode;
+    use serde_json::{json, Value as JsonValue};
 
-    #[tokio::test]
-    async fn test_fetch_beacon_header_slot_not_missed() {
-        // slot 11805092 is an example of a slot that is not missed
-        let slot_not_missed = 11805092;
-        let mut server = mockito::Server::new_async().await;
-        let http_client = ReqwestClient::new();
+    #[test]
+    fn test_parse_valid_slot_number() {
+        let args_json = json!({ "slot_number": 12345 }).to_string();
+        assert_eq!(parse_slot_number_arg(&args_json), Ok(12345u64));
+    }
 
-        let mock_path = format!("/eth/v1/beacon/headers/{slot_not_missed}");
-        let mock = server
-            .mock("get", mock_path.as_str()) // mockito method matching is case-insensitive
-            .with_status(200)
-            .create_async()
-            .await;
+    #[test]
+    fn test_parse_slot_number_not_u64() {
+        let args_json = json!({ "slot_number": "not_a_number" }).to_string();
+        match parse_slot_number_arg(&args_json) {
+            Ok(_) => panic!("expected error for non-u64 slot_number"),
+            Err(e) => assert!(e.contains("argument 'slot_number' was not a valid u64")),
+        }
+    }
 
-        let result = fetch_beacon_header(&http_client, &server.url(), slot_not_missed).await;
+    #[test]
+    fn test_parse_slot_number_negative_integer() {
+        let args_json = json!({ "slot_number": -10 }).to_string();
+        match parse_slot_number_arg(&args_json) {
+            Ok(_) => panic!("expected error for negative slot_number"),
+            Err(e) => assert!(e.contains("argument 'slot_number' was not a valid u64")),
+        }
+    }
 
-        mock.assert_async().await; // verify the mock was called
-        match result {
-            Ok(SlotStatus::NotMissed) => { /* test passed */ }
-            _ => panic!(
-                "expected slot {slot_not_missed} to be slotstatus::notmissed, got {result:?}"
-            ),
+    #[test]
+    fn test_parse_slot_number_missing() {
+        let args_json = json!({ "other_arg": 123 }).to_string();
+        match parse_slot_number_arg(&args_json) {
+            Ok(_) => panic!("expected error for missing slot_number"),
+            Err(e) => assert!(e.contains("argument 'slot_number' missing")),
+        }
+    }
+
+    #[test]
+    fn test_parse_malformed_json() {
+        let args_json = "this is not json";
+        match parse_slot_number_arg(args_json) {
+            Ok(_) => panic!("expected error for malformed json"),
+            Err(e) => assert!(e.contains("failed to parse arguments json")),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_json_object() {
+        let args_json = json!({}).to_string();
+        match parse_slot_number_arg(&args_json) {
+            Ok(_) => panic!("expected error for empty json object (missing slot_number)"),
+            Err(e) => assert!(e.contains("argument 'slot_number' missing")),
         }
     }
 
     #[tokio::test]
-    async fn test_fetch_beacon_header_slot_missed() {
-        // slot 11805091 is an example of a slot that is missed
-        let slot_missed = 11805091;
-        let mut server = mockito::Server::new_async().await;
-        let http_client = ReqwestClient::new();
+    async fn test_execute_slot_check_not_missed() {
+        let slot_number = 12345u64;
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn
+            .expect_slot_status()
+            .withf(move |&s| s == slot_number)
+            .times(1)
+            .returning(|_| Ok(StatusCode::OK));
 
-        let mock_path = format!("/eth/v1/beacon/headers/{slot_missed}");
-        let mock = server
-            .mock("get", mock_path.as_str())
-            .with_status(404) // 404 indicates a missed slot
-            .create_async()
-            .await;
+        let args = json!({ "slot_number": slot_number }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "not_missed",
+            "message": "a block header was found for the specified slot."
+        })
+        .to_string();
+        assert_eq!(result, expected_json);
+    }
 
-        let result = fetch_beacon_header(&http_client, &server.url(), slot_missed).await;
+    #[tokio::test]
+    async fn test_execute_slot_check_missed() {
+        let slot_number = 54321u64;
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn
+            .expect_slot_status()
+            .withf(move |&s| s == slot_number)
+            .times(1)
+            .returning(|_| Ok(StatusCode::NOT_FOUND));
 
-        mock.assert_async().await; // verify the mock was called
-        match result {
-            Ok(SlotStatus::Missed) => { /* test passed */ }
-            _ => panic!("expected slot {slot_missed} to be slotstatus::missed, got {result:?}"),
-        }
+        let args = json!({ "slot_number": slot_number }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "missed",
+            "message": "the specified slot was missed (no block header found)."
+        })
+        .to_string();
+        assert_eq!(result, expected_json);
+    }
+
+    #[tokio::test]
+    async fn test_execute_slot_check_other_status_code() {
+        let slot_number = 67890u64;
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn
+            .expect_slot_status()
+            .withf(move |&s| s == slot_number)
+            .times(1)
+            .returning(|_| Ok(StatusCode::INTERNAL_SERVER_ERROR));
+
+        let args = json!({ "slot_number": slot_number }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "error",
+            "message": "an error occurred while checking the slot.",
+            "details": "beacon node responded with http status: 500 internal server error"
+        })
+        .to_string();
+        assert_eq!(result, expected_json);
+    }
+
+    #[tokio::test]
+    async fn test_execute_slot_check_beacon_node_service_error() {
+        let slot_number = 91011u64;
+        let error_msg = "network connection failed".to_string();
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn
+            .expect_slot_status()
+            .withf(move |&s| s == slot_number)
+            .times(1)
+            .returning({
+                let em = error_msg.clone();
+                move |_| Err(eyre!(em.clone()))
+            });
+
+        let args = json!({ "slot_number": slot_number }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "error",
+            "message": "an error occurred while checking the slot.",
+            "details": format!("failed to query beacon node for slot {}: {}", slot_number, error_msg)
+        }).to_string();
+        assert_eq!(result, expected_json);
+    }
+
+    #[tokio::test]
+    async fn test_execute_invalid_slot_arg_handled() {
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn.expect_slot_status().times(0);
+
+        let args = json!({ "slot_number": "not_a_number" }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "error",
+            "message": "invalid_argument",
+            "details": "argument 'slot_number' was not a valid u64"
+        })
+        .to_string();
+        assert_eq!(result, expected_json);
+    }
+
+    #[tokio::test]
+    async fn test_execute_missing_slot_arg_handled() {
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn.expect_slot_status().times(0);
+
+        let args = json!({ "other_arg": 123 }).to_string();
+        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let expected_json = json!({
+            "status": "error",
+            "message": "invalid_argument",
+            "details": "argument 'slot_number' missing"
+        })
+        .to_string();
+        assert_eq!(result, expected_json);
+    }
+
+    #[tokio::test]
+    async fn test_execute_malformed_json_arg_handled() {
+        let mut mock_bn = MockBeaconNode::new();
+        mock_bn.expect_slot_status().times(0);
+
+        let malformed_args = "not json";
+        let result = execute_beacon_slot_check(malformed_args, &mock_bn)
+            .await
+            .unwrap();
+        let result_json: JsonValue = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(result_json["status"], "error");
+        assert_eq!(result_json["message"], "argument_parsing_error");
+        assert!(result_json["details"]
+            .as_str()
+            .unwrap()
+            .contains("failed to parse arguments json"));
     }
 }

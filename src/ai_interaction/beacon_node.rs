@@ -1,0 +1,137 @@
+use eyre::{eyre, Context, Result};
+use mockall::automock;
+use reqwest::{Client, StatusCode};
+use tracing::{error, info, instrument, warn};
+
+#[allow(async_fn_in_trait)]
+#[automock]
+pub trait BeaconNode {
+    async fn slot_status(&self, slot: u64) -> Result<StatusCode, eyre::Report>;
+}
+
+#[derive(Clone)]
+pub struct BeaconNodeHttp {
+    client: Client,
+    url: String,
+}
+
+impl BeaconNodeHttp {
+    pub fn new(url: String) -> Self {
+        Self {
+            client: Client::new(),
+            url,
+        }
+    }
+}
+
+impl BeaconNode for BeaconNodeHttp {
+    #[instrument(skip(self))]
+    async fn slot_status(&self, slot: u64) -> Result<StatusCode, eyre::Report> {
+        let request_url = format!("{}/eth/v1/beacon/headers/{slot}", self.url);
+        info!(url = %request_url, slot = %slot, "fetching beacon header status for slot");
+
+        match self.client.get(&request_url).send().await {
+            Ok(response) => {
+                info!(slot = %slot, status = %response.status(), "received status from beacon node");
+                Ok(response.status())
+            }
+            Err(e) => {
+                error!(slot = %slot, error = %e, "failed to send request to beacon node");
+                Err(eyre!(e))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{Matcher, Server as MockitoServer};
+    use reqwest::StatusCode;
+
+    #[tokio::test]
+    async fn test_beacon_node_http_slot_ok() {
+        let slot_number = 11805092;
+        let mut server = MockitoServer::new_async().await;
+
+        let mock_path = format!("/eth/v1/beacon/headers/{slot_number}");
+        let mock = server
+            .mock("get", Matcher::Exact(mock_path.clone()))
+            .with_status(200)
+            .create_async()
+            .await;
+
+        let beacon_node = BeaconNodeHttp::new(server.url());
+        let result = beacon_node.slot_status(slot_number).await;
+
+        mock.assert_async().await;
+        match result {
+            Ok(status_code) => assert_eq!(status_code, StatusCode::OK),
+            Err(e) => panic!("expected Ok(StatusCode::OK), got Err({:?})", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beacon_node_http_slot_not_found() {
+        let slot_number = 11805091;
+        let mut server = MockitoServer::new_async().await;
+
+        let mock_path = format!("/eth/v1/beacon/headers/{slot_number}");
+        let mock = server
+            .mock("get", Matcher::Exact(mock_path.clone()))
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let beacon_node = BeaconNodeHttp::new(server.url());
+        let result = beacon_node.slot_status(slot_number).await;
+
+        mock.assert_async().await;
+        match result {
+            Ok(status_code) => assert_eq!(status_code, StatusCode::NOT_FOUND),
+            Err(e) => panic!("expected Ok(StatusCode::NOT_FOUND), got Err({:?})", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beacon_node_http_slot_server_error() {
+        let slot_number = 123456;
+        let mut server = MockitoServer::new_async().await;
+
+        let mock_path = format!("/eth/v1/beacon/headers/{slot_number}");
+        let mock = server
+            .mock("get", Matcher::Exact(mock_path.clone()))
+            .with_status(500)
+            .with_body("internal server error from mock")
+            .create_async()
+            .await;
+
+        let beacon_node = BeaconNodeHttp::new(server.url());
+        let result = beacon_node.slot_status(slot_number).await;
+
+        mock.assert_async().await;
+        match result {
+            Ok(status_code) => assert_eq!(status_code, StatusCode::INTERNAL_SERVER_ERROR),
+            Err(e) => panic!(
+                "expected Ok(StatusCode::INTERNAL_SERVER_ERROR), got Err({:?})",
+                e
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_beacon_node_http_request_failed() {
+        let slot_number = 789101;
+        let beacon_node = BeaconNodeHttp::new("http://127.0.0.1:3".to_string());
+
+        let result = beacon_node.slot_status(slot_number).await;
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e
+                .to_string()
+                .to_lowercase()
+                .contains("failed to connect to beacon node"));
+        }
+    }
+}
