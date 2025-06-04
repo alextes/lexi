@@ -20,8 +20,28 @@ use crate::openai_api::{
 use openai_chat::DEFAULT_OPENAI_MODEL_ID;
 use openai_chat::OPENAI_CALL_CONFIG; // import the default model ID
 
+// added imports for global model id store
+use std::sync::LazyLock;
+use tokio::sync::RwLock;
+// end added imports
+
 pub mod openai_chat;
 pub mod tools;
+
+// global model id store
+pub static GLOBAL_MODEL_ID: LazyLock<RwLock<String>> =
+    LazyLock::new(|| RwLock::new(DEFAULT_OPENAI_MODEL_ID.to_string()));
+
+pub async fn get_current_model_id() -> String {
+    GLOBAL_MODEL_ID.read().await.clone()
+}
+
+pub async fn set_current_model_id(new_model_id: String) {
+    let mut model_id_guard = GLOBAL_MODEL_ID.write().await;
+    *model_id_guard = new_model_id.clone(); // clone new_model_id for the log
+    tracing::info!(new_global_model_id = %new_model_id, "global openai model id updated by admin tool");
+}
+// end global model id store
 
 /// represents the outcome of an ai conversation cycle.
 pub enum AiConversationOutcome {

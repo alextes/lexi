@@ -13,7 +13,6 @@
 
 pub mod r#loop;
 
-use crate::ai_interaction::openai_chat::DEFAULT_OPENAI_MODEL_ID;
 use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use crate::ai_interaction::{self, AiConversationOutcome};
@@ -272,7 +271,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     }
                 };
 
-                let current_model_id_for_ai_call = DEFAULT_OPENAI_MODEL_ID.to_string();
+                let current_model_id_for_ai_call = ai_interaction::get_current_model_id().await;
 
                 let beacon_url_for_handler = match crate::env::ENV_CONFIG.beacon_url.clone() {
                     Some(url) => url,
@@ -361,7 +360,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             _response_id,
                             new_model_id,
                         ) => {
-                            info!(chat_id = incoming_message.chat.id, %new_model_id, "openai model change requested for this chat.");
+                            info!(chat_id = incoming_message.chat.id, %new_model_id, "openai model change requested by admin tool. updating global model id.");
+                            ai_interaction::set_current_model_id(new_model_id.clone()).await;
                             let final_message_to_send = match serde_json::from_str::<Value>(
                                 &confirmation_json_str,
                             ) {
