@@ -32,7 +32,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
             .description(indoc!{"
                 the name of the manual to retrieve. available manuals:
                 'generate_proposer_reimbursement' (explains how to generate a proposer reimbursement).
-                'relay_dynamics' (explains the ultra sound relay, and gives context on bids, headers, block builders, adjustments, optimistic simulation, node operators, and proposers).
+                'relay_dynamics' (explains the ultra sound relay, and gives context on bids, headers, block builders, adjustments, optimistic simulation, node operators, proposers, and how the relay earns. when asked about anything related to these its often good to fetch the manual first).
             "}
             )
             .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME, RELAY_DYNAMICS_MANUAL_NAME])
@@ -61,6 +61,7 @@ fn get_manual_content(manual_name: &str) -> Result<String> {
         GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME => {
             Ok(include_str!("manuals/generate_proposer_reimbursement.md").to_string())
         }
+        RELAY_DYNAMICS_MANUAL_NAME => Ok(include_str!("manuals/relay_dynamics.md").to_string()),
         _ => {
             error!(%manual_name, "attempted to retrieve unknown manual");
             anyhow::bail!("unknown manual name: {}", manual_name)

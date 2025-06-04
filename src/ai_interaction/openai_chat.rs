@@ -55,23 +55,6 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     }
 });
 
-fn summarize_conversation_history(history: &[InputItem]) -> Vec<String> {
-    history
-        .iter()
-        .map(|item| match item {
-            InputItem::Message(msg) => match msg.role.as_str() {
-                "user" => "user_message".to_string(),
-                "assistant" => "assistant_message".to_string(),
-                "tool" => "tool_message_generic".to_string(),
-                _ => format!("message_role_{}", msg.role),
-            },
-            InputItem::FunctionCallOutput(_) => "tool_call_output".to_string(),
-            InputItem::FunctionCallEcho(_) => "tool_call_echo".to_string(),
-            InputItem::Text(_) => "text_input_item".to_string(),
-        })
-        .collect()
-}
-
 /// parses the output items from an openai api response.
 fn parse_api_response_output(
     output_items: Vec<OutputItem>,
@@ -98,6 +81,10 @@ fn parse_api_response_output(
                         }
                     }
                 }
+            }
+            OutputItem::Reasoning(reasoning_item) => {
+                debug!(reasoning_item_id = %reasoning_item.id, reasoning_summary = ?reasoning_item.summary, "received reasoning item, ignoring for now.");
+                // currently, we just log and ignore reasoning items.
             }
         }
     }
@@ -227,7 +214,6 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
             // now, call the api again with the accumulated history including tool results.
             debug!(
                 response_id = %current_response_id,
-                history_summary = ?summarize_conversation_history(&conversation_history),
                 "sending updated conversation history to api (after tool results)"
             );
             let next_api_args = CallResponsesApiOptionalArgs {
@@ -266,7 +252,6 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
             info!(response_id = %current_response_id, "received final assistant message");
             debug!(
                 response_id = %current_response_id,
-                final_history_summary = ?summarize_conversation_history(&conversation_history),
                 "final conversation history state"
             );
             return Ok(AiConversationOutcome::TextMessage(
@@ -277,7 +262,6 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
             warn!(response_id = %current_response_id, "openai api response output was empty or contained no actionable items.");
             debug!(
                 response_id = %current_response_id,
-                empty_turn_history_summary = ?summarize_conversation_history(&conversation_history),
                 "conversation history state on empty/unhandled turn"
             );
             return Ok(AiConversationOutcome::TextMessage(
@@ -364,102 +348,10 @@ mod tests {
     use super::*;
     use crate::ai_interaction::tools::conversation_admin;
     use crate::openai_api::{
-        FunctionCallOutputItem, InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage,
-        OutputTextContent, ToolDefinition,
+        InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage, OutputTextContent,
+        ToolDefinition,
     };
 
-    #[test]
-    fn test_summarize_empty_history() {
-        let history: Vec<InputItem> = Vec::new();
-        assert_eq!(
-            summarize_conversation_history(&history),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
-    fn test_summarize_user_message() {
-        let history = vec![InputItem::Message(InputMessageObject {
-            role: "user".to_string(),
-            content: "hello".to_string(),
-        })];
-        assert_eq!(
-            summarize_conversation_history(&history),
-            vec!["user_message"]
-        );
-    }
-
-    #[test]
-    fn test_summarize_assistant_message() {
-        let history = vec![InputItem::Message(InputMessageObject {
-            role: "assistant".to_string(),
-            content: "world".to_string(),
-        })];
-        assert_eq!(
-            summarize_conversation_history(&history),
-            vec!["assistant_message"]
-        );
-    }
-
-    #[test]
-    fn test_summarize_tool_message() {
-        // Role "tool" for InputMessageObject is not typical for input, but testing completeness
-        let history = vec![InputItem::Message(InputMessageObject {
-            role: "tool".to_string(),
-            content: "tool stuff".to_string(),
-        })];
-        assert_eq!(
-            summarize_conversation_history(&history),
-            vec!["tool_message_generic"]
-        );
-    }
-
-    #[test]
-    fn test_summarize_function_call_output() {
-        let history = vec![InputItem::FunctionCallOutput(FunctionCallOutputItem {
-            r#type: "function_call_output".to_string(),
-            call_id: "call_123".to_string(),
-            output: "{{\"result\": \"ok\"}}".to_string(),
-        })];
-        assert_eq!(
-            summarize_conversation_history(&history),
-            vec!["tool_call_output"]
-        );
-    }
-
-    #[test]
-    fn test_summarize_mixed_history() {
-        let history = vec![
-            InputItem::Message(InputMessageObject {
-                role: "user".to_string(),
-                content: "first user message".to_string(),
-            }),
-            InputItem::Message(InputMessageObject {
-                role: "assistant".to_string(),
-                content: "first assistant reply".to_string(),
-            }),
-            InputItem::FunctionCallOutput(FunctionCallOutputItem {
-                r#type: "function_call_output".to_string(),
-                call_id: "call_abc".to_string(),
-                output: "tool output data".to_string(),
-            }),
-            InputItem::Message(InputMessageObject {
-                role: "user".to_string(),
-                content: "second user message".to_string(),
-            }),
-        ];
-        assert_eq!(
-            summarize_conversation_history(&history),
-            vec![
-                "user_message",
-                "assistant_message",
-                "tool_call_output",
-                "user_message"
-            ]
-        );
-    }
-
-    // --- tests for parse_api_response_output ---
     #[test]
     fn test_parse_empty_output_items() {
         let items: Vec<OutputItem> = Vec::new();

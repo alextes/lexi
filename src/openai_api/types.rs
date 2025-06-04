@@ -172,10 +172,19 @@ pub struct OutputFunctionCall {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct OutputReasoning {
+    pub r#type: String, // should be "reasoning"
+    pub id: String,
+    // using jsonvalue for summary as its structure might be flexible or is currently unknown
+    pub summary: Vec<OutputTextContent>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum OutputItem {
     Message(OutputMessage),
     FunctionCall(OutputFunctionCall),
+    Reasoning(OutputReasoning),
 }
 
 #[derive(Deserialize, Debug, Clone)]
