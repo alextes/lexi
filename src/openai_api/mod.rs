@@ -160,6 +160,9 @@ mod tests {
                     OutputItem::Reasoning(reasoning) => {
                         panic!("expected a message output, but got a reasoning: {reasoning:?}");
                     }
+                    OutputItem::WebSearchCall(ws) => {
+                        panic!("expected a message output, but got a web search call: {ws:?}");
+                    }
                 }
             }
             Err(e) => {
@@ -202,12 +205,12 @@ mod tests {
         };
         let sql_tool = ToolDefinition {
             r#type: "function".to_string(),
-            name: Some("execute_sql_query".to_string()),
+            name: "execute_sql_query".to_string(),
             description: Some("executes a sql select query against the postgresql database and returns the results. only select queries are permitted.".to_string()),
             parameters: Some(tool_params),
             strict: Some(true),
         };
-        let tools_val = vec![sql_tool];
+        let tools_val = vec![ApiToolType::Function(sql_tool)];
 
         let initial_instruction_text = "you are a helpful assistant. use tools when appropriate. the user table is tool_test_users.";
         let input_items_initial_val = vec![InputItem::Message(InputMessageObject {
@@ -254,6 +257,9 @@ mod tests {
             }
             OutputItem::Reasoning(reasoning) => {
                 panic!("expected a message output, but got a reasoning: {reasoning:?}");
+            }
+            OutputItem::WebSearchCall(ws) => {
+                panic!("expected a function call, but got a web search call: {ws:?}");
             }
         };
 
@@ -345,6 +351,9 @@ mod tests {
             }
             OutputItem::Reasoning(reasoning) => {
                 panic!("expected a message output, but got a reasoning: {reasoning:?}");
+            }
+            OutputItem::WebSearchCall(ws) => {
+                panic!("expected a message output, but got a web search call: {ws:?}");
             }
         }
     }
