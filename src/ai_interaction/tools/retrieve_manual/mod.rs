@@ -9,6 +9,7 @@ use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
 use eyre::Result;
+use indoc::indoc;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -16,6 +17,7 @@ use tracing::{error, info, instrument, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
 const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement";
+const RELAY_DYNAMICS_MANUAL_NAME: &str = "relay_dynamics";
 
 #[derive(Debug, serde::Deserialize)]
 struct RetrieveManualArgs {
@@ -27,8 +29,11 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     params_props.insert(
         "manual_name".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
-            .description(
-                "the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement' (explains how to generate a proposer reimbursement).",
+            .description(indoc!{"
+                the name of the manual to retrieve. available manuals:
+                'generate_proposer_reimbursement' (explains how to generate a proposer reimbursement).
+                'relay_dynamics' (explains the ultra sound relay, and gives context on bids, headers, block builders, adjustments, optimistic simulation, node operators, and proposers).
+            "}
             )
             .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME])
             .build(),
