@@ -122,16 +122,24 @@ mod tests {
     #[tokio::test]
     async fn test_beacon_node_http_request_failed() {
         let slot_number = 789101;
+        // use an invalid port to ensure a connection refused error
         let beacon_node = BeaconNodeHttp::new("http://127.0.0.1:3".to_string());
 
         let result = beacon_node.slot_status(slot_number).await;
 
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e
-                .to_string()
-                .to_lowercase()
-                .contains("failed to connect to beacon node"));
-        }
+        assert!(result.is_err(), "expected an error, but got ok");
+
+        // check that the underlying error is a reqwest connection error
+        let is_expected_error_type = result
+            .as_ref() // borrow to check the error type
+            .err()
+            .and_then(|e| e.downcast_ref::<reqwest::Error>())
+            .is_some_and(|reqwest_err| reqwest_err.is_connect());
+
+        assert!(
+            is_expected_error_type,
+            "error was not a reqwest connection error as expected. got: {:?}",
+            result.err().unwrap() // safe to unwrap due to the earlier assert!(result.is_err())
+        );
     }
 }
