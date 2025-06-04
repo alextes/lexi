@@ -35,7 +35,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
                 'relay_dynamics' (explains the ultra sound relay, and gives context on bids, headers, block builders, adjustments, optimistic simulation, node operators, and proposers).
             "}
             )
-            .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME])
+            .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME, RELAY_DYNAMICS_MANUAL_NAME])
             .build(),
     );
     let tool_params = ToolFunctionParameters {
