@@ -1,7 +1,7 @@
-use eyre::{eyre, Context, Result};
+use eyre::{eyre, Result};
 use mockall::automock;
 use reqwest::{Client, StatusCode};
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 
 #[allow(async_fn_in_trait)]
 #[automock]

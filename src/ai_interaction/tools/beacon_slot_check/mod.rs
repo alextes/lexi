@@ -1,4 +1,5 @@
-use crate::ai_interaction::beacon_node::BeaconNode;
+mod beacon_node;
+
 use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
 use eyre::Result;
 use reqwest::StatusCode;
@@ -6,6 +7,10 @@ use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tracing::{info, instrument, warn};
+
+pub use beacon_node::BeaconNode;
+pub use beacon_node::BeaconNodeHttp;
+pub use beacon_node::MockBeaconNode;
 
 pub const BEACON_SLOT_CHECK_TOOL_NAME: &str = "check_beacon_slot_missed";
 
@@ -136,7 +141,6 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_interaction::beacon_node::MockBeaconNode;
     use eyre::eyre;
     use reqwest::StatusCode;
     use serde_json::{json, Value as JsonValue};

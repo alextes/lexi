@@ -4,7 +4,7 @@
 //! it is designed to be independent of the calling context (e.g., telegram, cli) and focuses solely
 //! on the ai interaction flow, returning the final ai message and the last openai response id.
 
-use crate::db::Db; // import the db trait
+use crate::{ai_interaction::tools::beacon_slot_check::BeaconNode, db::Db}; // import the db trait
 use eyre::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info, instrument};
@@ -14,11 +14,8 @@ use crate::openai_api::{
 };
 use openai_chat::{OPENAI_CALL_CONFIG, OPENAI_RESPONSES_MODEL_ID};
 
-pub mod beacon_node;
 pub mod openai_chat;
 pub mod tools;
-
-use beacon_node::BeaconNode;
 
 /// represents the outcome of an ai conversation cycle.
 pub enum AiConversationOutcome {

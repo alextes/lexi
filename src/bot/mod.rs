@@ -14,7 +14,7 @@
 pub mod r#loop;
 
 use crate::ai_interaction;
-use crate::ai_interaction::beacon_node::BeaconNodeHttp;
+use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::db::Db;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
