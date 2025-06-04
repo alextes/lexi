@@ -15,6 +15,7 @@ use crate::{
     },
 };
 use eyre::Result;
+use indoc::indoc;
 use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -37,7 +38,13 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
         super::tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
     ];
-    let instructions = "you are a helpful ai assistant named lexi.".to_string();
+    let instructions = indoc! {"
+        you are a helpful ai assistant named lexi.
+        your main mode of communication is through telegram, responses will automatically be sent to the telegram chat.
+        you are part of the team running the ultra sound relay, and in this context may be asked to lend a hand.
+        whenever functioning as the ultra sound relay assistant, the manual `relay_dynamics` is available to provide more context.
+    "}
+    .to_string();
     OpenAiCallConfig {
         available_tools,
         instructions,
