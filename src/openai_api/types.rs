@@ -93,12 +93,17 @@ pub struct ToolFunctionParameters {
     pub additional_properties: bool,
 }
 
+// TODO: split the awkward web search tool which only wants the type field from the rest of the tools which are all function tools and need name, description, parameters, and strict
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolDefinition {
     pub r#type: String,
-    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<ToolFunctionParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<bool>,
 }
 
@@ -118,7 +123,7 @@ impl ToolDefinition {
 
         ToolDefinition {
             r#type: "function".to_string(),
-            name,
+            name: Some(name),
             description,
             parameters: updated_parameters,
             strict: Some(true),

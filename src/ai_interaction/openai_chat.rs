@@ -42,7 +42,13 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
         tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
         tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
-        tools::web_search::WEB_SEARCH_TOOL.clone(),
+        ToolDefinition {
+            r#type: "web_search_preview".to_string(),
+            name: None,
+            description: None,
+            parameters: None,
+            strict: None,
+        },
     ];
     let instructions = indoc! {"
         you are a helpful ai assistant named lexi.
@@ -316,10 +322,10 @@ fn determine_turn_tools(
                     "admin phrase with correct code detected. \'{}\' will be added to available tools for this turn.",
                     tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
                 );
-                if !turn_specific_available_tools
-                    .iter()
-                    .any(|t| t.name == tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
-                {
+                if !turn_specific_available_tools.iter().any(|t| {
+                    t.name
+                        == Some(tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())
+                }) {
                     turn_specific_available_tools
                         .push(tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone());
                 }
@@ -526,10 +532,12 @@ mod tests {
 
         let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
         assert_eq!(determined_tools.len(), 1);
-        assert!(determined_tools.iter().any(|t| t.name == "base_tool_1"));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == Some("base_tool_1".to_string())));
         assert!(!determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 
     #[test]
@@ -543,10 +551,12 @@ mod tests {
 
         let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
         assert_eq!(determined_tools.len(), 1);
-        assert!(determined_tools.iter().any(|t| t.name == "base_tool_2"));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == Some("base_tool_2".to_string())));
         assert!(!determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 
     #[test]
@@ -573,10 +583,12 @@ mod tests {
             2,
             "expected base_tool_3 and admin_tool"
         );
-        assert!(determined_tools.iter().any(|t| t.name == "base_tool_3"));
         assert!(determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some("base_tool_3".to_string())));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 
     #[test]
@@ -592,10 +604,10 @@ mod tests {
         assert_eq!(determined_tools.len(), 1);
         assert!(determined_tools
             .iter()
-            .any(|t| t.name == "another_base_tool"));
+            .any(|t| t.name == Some("another_base_tool".to_string())));
         assert!(!determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 
     #[test]
@@ -624,10 +636,12 @@ mod tests {
             1,
             "admin tool should not be added if phrase is not in the *latest* user message"
         );
-        assert!(determined_tools.iter().any(|t| t.name == "base_tool_4"));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == Some("base_tool_4".to_string())));
         assert!(!determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 
     #[test]
@@ -652,12 +666,15 @@ mod tests {
         assert_eq!(
             determined_tools
                 .iter()
-                .filter(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
+                .filter(|t| t.name
+                    == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string()))
                 .count(),
             1,
             "admin_tool should only appear once"
         );
-        assert!(determined_tools.iter().any(|t| t.name == "base_tool_5"));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == Some("base_tool_5".to_string())));
     }
 
     #[test]
@@ -679,6 +696,6 @@ mod tests {
         );
         assert!(determined_tools
             .iter()
-            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
     }
 }

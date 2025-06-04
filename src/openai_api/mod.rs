@@ -202,7 +202,7 @@ mod tests {
         };
         let sql_tool = ToolDefinition {
             r#type: "function".to_string(),
-            name: "execute_sql_query".to_string(),
+            name: Some("execute_sql_query".to_string()),
             description: Some("executes a sql select query against the postgresql database and returns the results. only select queries are permitted.".to_string()),
             parameters: Some(tool_params),
             strict: Some(true),
