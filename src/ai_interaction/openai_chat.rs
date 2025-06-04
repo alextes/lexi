@@ -23,7 +23,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::ai_interaction::tools::conversation_admin;
 use crate::env::ENV_CONFIG;
 
-pub const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1";
+pub const DEFAULT_OPENAI_MODEL_ID: &str = "gpt-4.1";
 
 use std::sync::LazyLock;
 
@@ -138,8 +138,10 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ToolDefinition>,
     system_instructions: &str,
+    current_model_id: String,
 ) -> Result<AiConversationOutcome> {
     let mut first_iteration = true;
+
     loop {
         let current_response_id = api_response.id.clone();
         let (function_calls_to_execute, assistant_text_content_this_turn) =
@@ -183,6 +185,20 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                                         current_response_id,
                                     ));
                                 }
+                                if json_val.get("action").and_then(|v| v.as_str())
+                                    == Some("model_updated")
+                                {
+                                    if let Some(new_model) =
+                                        json_val.get("new_model_id").and_then(|v| v.as_str())
+                                    {
+                                        info!(response_id = %current_response_id, new_model_id = %new_model, "openai model preference update triggered by admin tool.");
+                                        return Ok(AiConversationOutcome::ChangeModel(
+                                            tool_output_json_string,
+                                            current_response_id,
+                                            new_model.to_string(),
+                                        ));
+                                    }
+                                }
                             }
                         }
                         conversation_history.push(InputItem::FunctionCallOutput(
@@ -217,7 +233,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                 "sending updated conversation history to api (after tool results)"
             );
             let next_api_args = CallResponsesApiOptionalArgs {
-                model_id: OPENAI_RESPONSES_MODEL_ID,
+                model_id: &current_model_id,
                 previous_response_id: Some(&current_response_id),
                 tools: Some(available_tools.clone()),
                 tool_choice: None,
@@ -325,6 +341,7 @@ pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
     ctx: &super::HandlerContext<'_, D, B>,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
+    current_model_id: String,
 ) -> Result<AiConversationOutcome> {
     // determine tools for this specific turn
     let turn_specific_available_tools = determine_turn_tools(
@@ -339,6 +356,7 @@ pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
         initial_input_items,
         turn_specific_available_tools,
         &OPENAI_CALL_CONFIG.instructions,
+        current_model_id,
     )
     .await
 }

@@ -157,6 +157,9 @@ mod tests {
                     OutputItem::FunctionCall(fc) => {
                         panic!("expected a message output, but got a function call: {fc:?}");
                     }
+                    OutputItem::Reasoning(reasoning) => {
+                        panic!("expected a message output, but got a reasoning: {reasoning:?}");
+                    }
                 }
             }
             Err(e) => {
@@ -249,6 +252,9 @@ mod tests {
             OutputItem::Message(msg) => {
                 panic!("expected a function call, got a message: {msg:?}")
             }
+            OutputItem::Reasoning(reasoning) => {
+                panic!("expected a message output, but got a reasoning: {reasoning:?}");
+            }
         };
 
         assert_eq!(function_call_item.name, "execute_sql_query");
@@ -336,6 +342,9 @@ mod tests {
             }
             OutputItem::FunctionCall(fc) => {
                 panic!("expected a final message, but got another function call: {fc:?}");
+            }
+            OutputItem::Reasoning(reasoning) => {
+                panic!("expected a message output, but got a reasoning: {reasoning:?}");
             }
         }
     }

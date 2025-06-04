@@ -13,9 +13,10 @@
 
 pub mod r#loop;
 
-use crate::ai_interaction;
+use crate::ai_interaction::openai_chat::DEFAULT_OPENAI_MODEL_ID;
 use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
+use crate::ai_interaction::{self, AiConversationOutcome};
 use crate::db::Db;
 use crate::env::ENV_CONFIG;
 use crate::telegram;
@@ -271,6 +272,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     }
                 };
 
+                let current_model_id_for_ai_call = DEFAULT_OPENAI_MODEL_ID.to_string();
+
                 let beacon_url_for_handler = match crate::env::ENV_CONFIG.beacon_url.clone() {
                     Some(url) => url,
                     None => {
@@ -301,14 +304,12 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     &mp_ctx,
                     &prompt_text,
                     previous_response_id_opt_string.as_deref(),
+                    &current_model_id_for_ai_call,
                 )
                 .await
                 {
                     Ok(ai_outcome) => match ai_outcome {
-                        ai_interaction::AiConversationOutcome::TextMessage(
-                            final_text,
-                            response_id_to_store,
-                        ) => {
+                        AiConversationOutcome::TextMessage(final_text, response_id_to_store) => {
                             send_reply_and_update_state(
                                 ctx,
                                 incoming_message.chat.id,
@@ -318,7 +319,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             )
                             .await?;
                         }
-                        ai_interaction::AiConversationOutcome::ResetConversation(
+                        AiConversationOutcome::ResetConversation(
                             confirmation_json_str,
                             _response_id,
                         ) => {
@@ -350,17 +351,44 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             )
                             .await
                             .context("failed to send conversation reset confirmation message")?;
-                            if let Err(e) = ctx
-                                .db
-                                .clear_last_openai_response_id(local_chat_id_for_conversation)
-                                .await
-                            {
-                                error!(chat_id = incoming_message.chat.id, error = %e, "failed to clear last_openai_response_id for chat after reset command.");
-                            }
                             info!(
                                 chat_id = incoming_message.chat.id,
                                 "conversation reset for chat."
                             );
+                        }
+                        AiConversationOutcome::ChangeModel(
+                            confirmation_json_str,
+                            _response_id,
+                            new_model_id,
+                        ) => {
+                            info!(chat_id = incoming_message.chat.id, %new_model_id, "openai model change requested for this chat.");
+                            let final_message_to_send = match serde_json::from_str::<Value>(
+                                &confirmation_json_str,
+                            ) {
+                                Ok(json_val) => {
+                                    if let Some(msg_content) =
+                                        json_val.get("message").and_then(|v| v.as_str())
+                                    {
+                                        format!("system message: {}", msg_content)
+                                    } else {
+                                        warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "changemodel json did not contain a 'message' field. sending raw json.");
+                                        confirmation_json_str.to_string()
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(chat_id = incoming_message.chat.id, error = %e, raw_payload = %confirmation_json_str, "failed to parse changemodel json. sending raw string.");
+                                    confirmation_json_str.to_string()
+                                }
+                            };
+                            telegram::send_message(
+                                &ctx.http_client,
+                                ctx.api_base_url,
+                                ctx.bot_token,
+                                incoming_message.chat.id,
+                                &final_message_to_send,
+                            )
+                            .await
+                            .context("failed to send model change confirmation message")?;
                         }
                     },
                     Err(e) => {

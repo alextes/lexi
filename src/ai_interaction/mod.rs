@@ -17,7 +17,8 @@ use tracing::{error, info, instrument};
 use crate::openai_api::{
     call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
 };
-use openai_chat::{OPENAI_CALL_CONFIG, OPENAI_RESPONSES_MODEL_ID};
+use openai_chat::DEFAULT_OPENAI_MODEL_ID;
+use openai_chat::OPENAI_CALL_CONFIG; // import the default model ID
 
 pub mod openai_chat;
 pub mod tools;
@@ -30,6 +31,9 @@ pub enum AiConversationOutcome {
     /// the ai (or a tool called by the ai) requested the conversation to be reset.
     /// contains (confirmation_message_for_user, response_id_triggering_reset).
     ResetConversation(String, String),
+    /// the ai (or a tool called by the ai) requested the openai model to be changed for future turns.
+    /// contains (confirmation_message_for_user, response_id_triggering_change, new_model_id).
+    ChangeModel(String, String, String),
 }
 
 pub struct HandlerContext<'a, D: Db, B: BeaconNode> {
@@ -46,6 +50,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     ctx: &HandlerContext<'_, D, B>,
     prompt_text: &str,
     previous_response_id: Option<&str>,
+    current_model_id: &str,
 ) -> Result<AiConversationOutcome> {
     info!(
         // logging_id field is now part of the span
@@ -61,7 +66,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     })];
 
     let initial_api_args = CallResponsesApiOptionalArgs {
-        model_id: OPENAI_RESPONSES_MODEL_ID,
+        model_id: current_model_id,
         previous_response_id,
         tools: Some(OPENAI_CALL_CONFIG.available_tools.clone()),
         tool_choice: None,
@@ -78,11 +83,14 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     )
     .await
     {
-        Ok(api_response_1) => {
-            openai_chat::start_ai_processing_loop(ctx, api_response_1, input_items)
-                .await
-                .context("core ai conversation processing loop failed")
-        }
+        Ok(api_response_1) => openai_chat::start_ai_processing_loop(
+            ctx,
+            api_response_1,
+            input_items,
+            current_model_id.to_string(),
+        )
+        .await
+        .context("core ai conversation processing loop failed"),
         Err(e) => {
             error!(error = %e, "initial /v1/responses api call failed");
             Err(e)
@@ -99,7 +107,7 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
         prompt = prompt_text,
         "processing single prompt via core ai driver"
     );
-    match drive_ai_conversation(ctx, prompt_text, None).await {
+    match drive_ai_conversation(ctx, prompt_text, None, DEFAULT_OPENAI_MODEL_ID).await {
         Ok(outcome) => match outcome {
             AiConversationOutcome::TextMessage(message, response_id) => Ok((message, response_id)),
             AiConversationOutcome::ResetConversation(message, response_id) => {
@@ -112,6 +120,17 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
                         message
                     ),
                     response_id,
+                ))
+            }
+            AiConversationOutcome::ChangeModel(message, response_id, new_model_id) => {
+                // For CLI, inform about model change.
+                info!(response_id = %response_id, %new_model_id, "openai model change requested by ai/tool.");
+                Ok((
+                    format!(
+                        "openai model change to '{}' requested by ai/tool. confirmation: \"{}\"",
+                        new_model_id, message
+                    ),
+                    response_id, // return original response_id that triggered change
                 ))
             }
         },
