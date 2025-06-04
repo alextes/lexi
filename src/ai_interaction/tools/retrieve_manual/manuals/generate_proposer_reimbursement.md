@@ -45,7 +45,7 @@ this manual outlines the steps to generate a message for proposer reimbursement 
           coalesce(proposer_labels, 'unknown')             as proposer_labels,
           adjusted_bid_value > 0                           as is_adjusted_bid, -- important for reporting
           bid_value,
-          bid_value / 1e18                                 as bid_value_eth,
+          round(bid_value / 1e18, 3)                       as bid_value_eth,
           10000000000000000                                as penalty,
           round(10000000000000000 / 1e18, 3)::text         as penalty_eth,
           10000000000000000 + bid_value                    as total,
