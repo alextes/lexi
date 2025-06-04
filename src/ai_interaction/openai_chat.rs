@@ -10,8 +10,8 @@ use super::{AiConversationOutcome, BeaconNode};
 use crate::{
     db::Db,
     openai_api::{
-        self, CallResponsesApiOptionalArgs, InputItem, InputMessageObject, OpenAiApiResponse,
-        OutputFunctionCall, OutputItem, ToolDefinition,
+        self, ApiToolType, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
+        OpenAiApiResponse, OutputFunctionCall, OutputItem, WebSearchToolConfig,
     },
 };
 use anyhow::Result;
@@ -29,26 +29,20 @@ use std::sync::LazyLock;
 
 // struct to hold prepared configuration for openai api calls
 pub struct OpenAiCallConfig {
-    pub available_tools: Vec<ToolDefinition>,
+    pub available_tools: Vec<ApiToolType>,
     pub instructions: String,
 }
 
 pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     let available_tools = vec![
-        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
-        tools::db_schema::DATABASE_SCHEMA_TOOL.clone(),
-        tools::db_query::MEVDB_QUERY_TOOL.clone(),
-        tools::db_query::GLOBALDB_QUERY_TOOL.clone(),
-        tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
-        tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
-        tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
-        ToolDefinition {
-            r#type: "web_search_preview".to_string(),
-            name: None,
-            description: None,
-            parameters: None,
-            strict: None,
-        },
+        ApiToolType::Function(tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone()),
+        ApiToolType::Function(tools::db_schema::DATABASE_SCHEMA_TOOL.clone()),
+        ApiToolType::Function(tools::db_query::MEVDB_QUERY_TOOL.clone()),
+        ApiToolType::Function(tools::db_query::GLOBALDB_QUERY_TOOL.clone()),
+        ApiToolType::Function(tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone()),
+        ApiToolType::Function(tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone()),
+        ApiToolType::Function(tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone()),
+        ApiToolType::WebSearch(WebSearchToolConfig::new()),
     ];
     let instructions = indoc! {"
         you are a helpful ai assistant named lexi.
@@ -93,6 +87,11 @@ fn parse_api_response_output(
             OutputItem::Reasoning(reasoning_item) => {
                 debug!(reasoning_item_id = %reasoning_item.id, reasoning_summary = ?reasoning_item.summary, "received reasoning item, ignoring for now.");
                 // currently, we just log and ignore reasoning items.
+            }
+            OutputItem::WebSearchCall(web_search_call_item) => {
+                debug!(web_search_call_id = %web_search_call_item.id, status = %web_search_call_item.status, "received web_search_call item, ignoring for now.");
+                // The actual content from web search comes in a subsequent Message item with annotations.
+                // We log and ignore this specific item type for now in this parsing function.
             }
         }
     }
@@ -144,7 +143,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
     ctx: &super::HandlerContext<'_, D, B>,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
-    available_tools: Vec<ToolDefinition>,
+    available_tools: Vec<ApiToolType>,
     system_instructions: &str,
     current_model_id: String,
 ) -> Result<AiConversationOutcome> {
@@ -301,9 +300,9 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
 /// like the conversation_admin_tool if certain conditions (e.g., admin code in user message) are met.
 fn determine_turn_tools(
     initial_input_items: &[InputItem],
-    base_available_tools: &[ToolDefinition],
+    base_available_tools: &[ApiToolType],
     bot_admin_code: Option<&str>,
-) -> Vec<ToolDefinition> {
+) -> Vec<ApiToolType> {
     let mut turn_specific_available_tools = base_available_tools.to_vec();
 
     if let Some(expected_admin_code_val) = bot_admin_code {
@@ -319,26 +318,30 @@ fn determine_turn_tools(
         }) {
             if last_user_message_content.contains(&admin_trigger_phrase) {
                 info!(
-                    "admin phrase with correct code detected. \'{}\' will be added to available tools for this turn.",
+                    "admin phrase with correct code detected. '{}' will be added to available tools for this turn.",
                     tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
                 );
-                if !turn_specific_available_tools.iter().any(|t| {
-                    t.name
-                        == Some(tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())
+                if !turn_specific_available_tools.iter().any(|tool_type| {
+                    if let ApiToolType::Function(func_tool) = tool_type {
+                        func_tool.name == tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                    } else {
+                        false
+                    }
                 }) {
-                    turn_specific_available_tools
-                        .push(tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone());
+                    turn_specific_available_tools.push(ApiToolType::Function(
+                        tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
+                    ));
                 }
             } else {
                 info!(
-                    "admin code is configured, but trigger phrase not found or incorrect in user message. \'{}\' will not be added.",
+                    "admin code is configured, but trigger phrase not found or incorrect in user message. '{}' will not be added.",
                     tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
                 );
             }
         }
     } else {
         info!(
-            "no bot_admin_code is configured. \'{}\' will not be available.",
+            "no bot_admin_code is configured. '{}' will not be available.",
             tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
         );
     }
@@ -374,8 +377,8 @@ mod tests {
     use super::*;
     use crate::ai_interaction::tools::conversation_admin;
     use crate::openai_api::{
-        InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage, OutputTextContent,
-        ToolDefinition,
+        ApiToolType, InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage,
+        OutputTextContent, ToolDefinition, WebSearchToolConfig,
     };
 
     #[test]
@@ -519,8 +522,12 @@ mod tests {
 
     // --- tests for determine_turn_tools ---
     // helper to create a dummy tool definition
-    fn dummy_tool(name: &str) -> ToolDefinition {
-        ToolDefinition::new(name.to_string(), Some("description".to_string()), None)
+    fn dummy_tool(name: &str) -> ApiToolType {
+        ApiToolType::Function(ToolDefinition::new(
+            name.to_string(),
+            Some("description".to_string()),
+            None,
+        ))
     }
 
     #[test]
@@ -532,12 +539,14 @@ mod tests {
 
         let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
         assert_eq!(determined_tools.len(), 1);
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("base_tool_1".to_string())));
-        assert!(!determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool_1",
+            _ => false,
+        }));
+        assert!(!determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 
     #[test]
@@ -551,12 +560,14 @@ mod tests {
 
         let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
         assert_eq!(determined_tools.len(), 1);
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("base_tool_2".to_string())));
-        assert!(!determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool_2",
+            _ => false,
+        }));
+        assert!(!determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 
     #[test]
@@ -583,12 +594,14 @@ mod tests {
             2,
             "expected base_tool_3 and admin_tool"
         );
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("base_tool_3".to_string())));
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool_3",
+            _ => false,
+        }));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 
     #[test]
@@ -602,12 +615,14 @@ mod tests {
 
         let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
         assert_eq!(determined_tools.len(), 1);
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("another_base_tool".to_string())));
-        assert!(!determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "another_base_tool",
+            _ => false,
+        }));
+        assert!(!determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 
     #[test]
@@ -636,12 +651,14 @@ mod tests {
             1,
             "admin tool should not be added if phrase is not in the *latest* user message"
         );
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("base_tool_4".to_string())));
-        assert!(!determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool_4",
+            _ => false,
+        }));
+        assert!(!determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 
     #[test]
@@ -649,7 +666,9 @@ mod tests {
         // this tests the idempotency if admin tool was already in base_tools for some reason
         let admin_secret = "yetanother";
         let mut base_tools = vec![dummy_tool("base_tool_5")];
-        base_tools.push(conversation_admin::CONVERSATION_ADMIN_TOOL.clone()); // admin tool already present
+        base_tools.push(ApiToolType::Function(
+            conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
+        )); // admin tool already present
 
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
@@ -666,21 +685,25 @@ mod tests {
         assert_eq!(
             determined_tools
                 .iter()
-                .filter(|t| t.name
-                    == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string()))
+                .filter(|t| match t {
+                    ApiToolType::Function(f) =>
+                        f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+                    _ => false,
+                })
                 .count(),
             1,
             "admin_tool should only appear once"
         );
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some("base_tool_5".to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool_5",
+            _ => false,
+        }));
     }
 
     #[test]
     fn dtt_empty_base_tools_admin_code_provided_with_trigger() {
         let admin_secret = "for_empty_base";
-        let base_tools: Vec<ToolDefinition> = Vec::new(); // No base tools
+        let base_tools: Vec<ApiToolType> = Vec::new(); // No base tools, changed type
 
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
@@ -694,8 +717,9 @@ mod tests {
             1,
             "only admin_tool should be present"
         );
-        assert!(determined_tools
-            .iter()
-            .any(|t| t.name == Some(conversation_admin::CONVERSATION_ADMIN_TOOL_NAME.to_string())));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
     }
 }

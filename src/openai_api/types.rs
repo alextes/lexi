@@ -16,7 +16,7 @@ pub enum ToolChoice {
 pub struct CallResponsesApiOptionalArgs<'a> {
     pub model_id: &'a str,
     pub previous_response_id: Option<&'a str>,
-    pub tools: Option<Vec<ToolDefinition>>,
+    pub tools: Option<Vec<ApiToolType>>,
     pub tool_choice: Option<ToolChoice>,
     pub instructions: Option<&'a str>,
     pub temperature: Option<f64>,
@@ -93,12 +93,11 @@ pub struct ToolFunctionParameters {
     pub additional_properties: bool,
 }
 
-// TODO: split the awkward web search tool which only wants the type field from the rest of the tools which are all function tools and need name, description, parameters, and strict
+// This struct is now specifically for "function" tools.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolDefinition {
-    pub r#type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub r#type: String, // Will always be "function"
+    pub name: String,   // Changed from Option<String>
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,7 +109,8 @@ pub struct ToolDefinition {
 impl ToolDefinition {
     #[must_use]
     pub fn new(
-        name: String,
+        // Renamed for clarity if needed, but new() is fine if it's the primary way for function tools
+        name: String, // Changed from Option<String>
         description: Option<String>,
         parameters: Option<ToolFunctionParameters>,
     ) -> Self {
@@ -122,13 +122,37 @@ impl ToolDefinition {
         }
 
         ToolDefinition {
-            r#type: "function".to_string(),
-            name: Some(name),
+            r#type: "function".to_string(), // Hardcoded for function tools
+            name,                           // No longer Some(name)
             description,
             parameters: updated_parameters,
             strict: Some(true),
         }
     }
+}
+
+// New struct for Web Search tool configuration
+#[derive(Serialize, Debug, Clone)]
+pub struct WebSearchToolConfig {
+    pub r#type: String, // Will always be "web_search_preview"
+                        // Potentially: pub user_location: Option<UserLocationConfig>,
+                        // Potentially: pub search_context_size: Option<SearchContextSizeConfig>,
+}
+
+impl WebSearchToolConfig {
+    pub fn new() -> Self {
+        WebSearchToolConfig {
+            r#type: "web_search_preview".to_string(),
+        }
+    }
+}
+
+// Enum to wrap different tool types for the API
+#[derive(Serialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum ApiToolType {
+    Function(ToolDefinition),
+    WebSearch(WebSearchToolConfig),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -184,12 +208,24 @@ pub struct OutputReasoning {
     pub summary: Vec<OutputTextContent>,
 }
 
+// New struct for the web_search_call output item
+#[derive(Deserialize, Debug, Clone)]
+pub struct OutputWebSearchCall {
+    pub r#type: String, // will be "web_search_call"
+    pub id: String,
+    pub status: String, // e.g., "completed"
+                        // According to OpenAI docs, it only has id, type, status.
+                        // If other fields like 'name' or 'arguments' appear for web_search_call,
+                        // they would need to be added here.
+}
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum OutputItem {
     Message(OutputMessage),
     FunctionCall(OutputFunctionCall),
     Reasoning(OutputReasoning),
+    WebSearchCall(OutputWebSearchCall), // Added new variant
 }
 
 #[derive(Deserialize, Debug, Clone)]
