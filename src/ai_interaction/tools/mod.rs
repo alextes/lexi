@@ -4,3 +4,4 @@ pub mod db_query;
 pub mod db_schema;
 pub mod relay_circuit_breaker;
 pub mod retrieve_manual;
+pub mod web_search;

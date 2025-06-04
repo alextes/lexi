@@ -42,6 +42,7 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
         tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
         tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
+        tools::web_search::WEB_SEARCH_TOOL.clone(),
     ];
     let instructions = indoc! {"
         you are a helpful ai assistant named lexi.
