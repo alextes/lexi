@@ -1,9 +1,7 @@
 {
-  "agentCanUpdateSnapshot": true,
-  "install": "cargo build",
-  "start": "cargo check",
   "build": {
-    "context": ".",
-    "dockerfile": "Dockerfile"
-  }
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "terminals": []
 }
