@@ -23,3 +23,7 @@ this is how the ultra sound relay team makes money. the relay will attempt last 
 `auction_analysis` is the most important table. it shows the winning bid for each slot. for all relays.
 `turbo_header_requests` is the second most important table. it shows the bids offered for each slot to the proposer by the ultra sound relay.
 `block_production` is a stale table. don't use it.
+
+## geography
+
+some tables will feature a `geo` column. ultra sound operates block auctions in multiple regions, so far `rbx` and `vin`. this column will indicate where a builder block submission was received, or where a proposer header was given out.
