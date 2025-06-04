@@ -21,7 +21,6 @@ use tracing::{debug, error, info, instrument, warn};
 
 // add these imports
 use crate::ai_interaction::tools;
-use crate::env::ENV_CONFIG;
 
 pub const DEFAULT_OPENAI_MODEL_ID: &str = "gpt-4.1";
 
