@@ -83,13 +83,7 @@ impl RelayCircuitBreaker {
 
         info!(url = %request_url, "sending circuit breaker state request");
 
-        match self
-            .http_client
-            .post(&request_url)
-            // .json(&request_body)
-            .send()
-            .await
-        {
+        match self.http_client.get(&request_url).send().await {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {
@@ -234,7 +228,7 @@ mod tests {
             "/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
         );
         let mock_api = server
-            .mock("post", Matcher::Exact(mock_path.clone()))
+            .mock("get", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "adjustment circuit breaker enabled"}"#)
@@ -271,7 +265,7 @@ mod tests {
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
         );
         let mock_api = server
-            .mock("post", Matcher::Exact(mock_path.clone()))
+            .mock("get", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "auction circuit breaker disabled"}"#)
@@ -307,7 +301,7 @@ mod tests {
             "/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
         );
         let mock_api = server
-            .mock("post", Matcher::Exact(mock_path.clone()))
+            .mock("get", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "adjustment cb enabled"}"#)
@@ -347,7 +341,7 @@ mod tests {
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
         );
         let mock_api = server
-            .mock("post", Matcher::Exact(mock_path.clone()))
+            .mock("get", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "auction cb disabled"}"#)
@@ -406,7 +400,7 @@ mod tests {
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
         );
         let mock_api = server
-            .mock("post", Matcher::Exact(mock_path.clone()))
+            .mock("get", Matcher::Exact(mock_path.clone()))
             .with_status(500)
             .with_body(r#"{"error": "internal server blew up"}"#)
             .create_async()
