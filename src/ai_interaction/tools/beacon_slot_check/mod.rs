@@ -1,7 +1,7 @@
 mod beacon_node;
 
 use crate::openai_api::{ToolDefinition, ToolFunctionParameterProperty, ToolFunctionParameters};
-use eyre::Result;
+use anyhow::Result;
 use reqwest::StatusCode;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
@@ -141,7 +141,7 @@ pub static BEACON_SLOT_CHECK_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eyre::eyre;
+    use anyhow::anyhow;
     use reqwest::StatusCode;
     use serde_json::{json, Value as JsonValue};
 
@@ -268,7 +268,7 @@ mod tests {
             .times(1)
             .returning({
                 let em = error_msg.clone();
-                move |_| Err(eyre!(em.clone()))
+                move |_| Err(anyhow!(em.clone()))
             });
 
         let args = json!({ "slot_number": slot_number }).to_string();

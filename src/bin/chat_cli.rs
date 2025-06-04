@@ -5,8 +5,8 @@
 //! this is useful for quick iterative testing of the ai's capabilities, tool usage, and prompt handling
 //! without needing to interact with a live telegram bot.
 
+use anyhow::{Context, Result};
 use clap::Parser;
-use eyre::{Context, Result};
 use lexi::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use lexi::ai_interaction::{self, HandlerContext as AiInteractionHandlerContext}; // Aliasing for clarity
 use lexi::env::ENV_CONFIG;
@@ -32,7 +32,6 @@ struct CliArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    color_eyre::install()?;
     dotenv::dotenv().ok();
 
     log::init();

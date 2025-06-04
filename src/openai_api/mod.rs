@@ -1,4 +1,4 @@
-use eyre::{eyre, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info};
 
@@ -71,7 +71,7 @@ pub async fn call_responses_api<'a>(
                     error = %e,
                     "failed to deserialize successful openai api response for {}", "/v1/responses"
                 );
-                Err(eyre!(
+                Err(anyhow!(
                     "failed to deserialize openai api response (status {}): {}. response body: {}",
                     response_status,
                     e,
@@ -85,7 +85,7 @@ pub async fn call_responses_api<'a>(
             response_body = %response_text,
             "error response from openai {} endpoint", "/v1/responses"
         );
-        Err(eyre!(
+        Err(anyhow!(
             "openai {} api call failed with status {}: {}. response: {}",
             "/v1/responses",
             response_status,
@@ -106,8 +106,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_responses_api_with_input_parameter() {
-        let _ = color_eyre::install();
-
         let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") {
             key
         } else {
@@ -175,7 +173,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_responses_api_with_function_tool() {
-        let _ = color_eyre::install();
         let api_key = if let Ok(key) = env::var("OPENAI_API_KEY") {
             key
         } else {

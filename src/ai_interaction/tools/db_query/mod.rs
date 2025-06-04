@@ -124,8 +124,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::execute_db_query_common;
+    use anyhow::Result;
     use chrono::{DateTime, Utc};
-    use eyre::Result;
     use serde_json::Value as JsonValue;
     use sqlx::{types::BigDecimal, PgPool};
     use std::str::FromStr;
@@ -202,9 +202,9 @@ mod tests {
         ];
 
         let arr = result_json_value.as_array().ok_or_else(|| {
-            eyre::eyre!("result was not a json array. got: {:?}", result_json_value)
+            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
         })?;
-        eyre::ensure!(
+        anyhow::ensure!(
             arr.len() == expected_rows_data.len(),
             "array length mismatch. expected {}, got: {}. array: {:?}",
             expected_rows_data.len(),
@@ -224,7 +224,7 @@ mod tests {
 
         for (row_idx, expected_row_tuple) in expected_rows_data.iter().enumerate() {
             let json_obj = arr[row_idx].as_object().ok_or_else(|| {
-                eyre::eyre!(
+                anyhow::anyhow!(
                     "element {} is not a json object. got: {:?}. full array: {:?}",
                     row_idx,
                     arr[row_idx],
@@ -259,7 +259,7 @@ mod tests {
                 match (json_val_for_col, expected_json_val_opt) {
                     (Some(actual_val), Some(expected_val)) => {
                         if actual_val.is_null() {
-                            eyre::bail!(
+                            anyhow::bail!(
                                 "row {}, col '{}': actual is null but expected non-null value {:?}. object: {:?}",
                                 row_idx, col_name, expected_val, json_obj
                             );
@@ -267,7 +267,7 @@ mod tests {
 
                         if col_name == "numeric_val" {
                             let actual_str = actual_val.as_str().ok_or_else(|| {
-                                eyre::eyre!(
+                                anyhow::anyhow!(
                                     "row {}, col '{}': numeric actual value is not a string: {:?}",
                                     row_idx,
                                     col_name,
@@ -275,37 +275,37 @@ mod tests {
                                 )
                             })?;
                             let expected_str = expected_val.as_str().ok_or_else(||
-                                eyre::eyre!("row {}, col '{}': numeric expected value is not a string: {:?}", row_idx, col_name, expected_val))?;
+                                anyhow::anyhow!("row {}, col '{}': numeric expected value is not a string: {:?}", row_idx, col_name, expected_val))?;
                             let actual_bd = BigDecimal::from_str(actual_str)?;
                             let expected_bd = BigDecimal::from_str(expected_str)?;
-                            eyre::ensure!(actual_bd == expected_bd,
+                            anyhow::ensure!(actual_bd == expected_bd,
                                 "row {}, col '{}': numeric mismatch. actual: {}, expected: {}. object: {:?}",
                                 row_idx, col_name, actual_bd, expected_bd, json_obj);
                         } else if col_name == "timestamp_val" {
                             let actual_str = actual_val.as_str().ok_or_else(||
-                                eyre::eyre!("row {}, col '{}': timestamp actual value is not a string: {:?}", row_idx, col_name, actual_val))?;
+                                anyhow::anyhow!("row {}, col '{}': timestamp actual value is not a string: {:?}", row_idx, col_name, actual_val))?;
                             let expected_str = expected_val.as_str().ok_or_else(||
-                                eyre::eyre!("row {}, col '{}': timestamp expected value is not a string: {:?}", row_idx, col_name, expected_val))?;
+                                anyhow::anyhow!("row {}, col '{}': timestamp expected value is not a string: {:?}", row_idx, col_name, expected_val))?;
                             let actual_dt =
                                 DateTime::parse_from_rfc3339(actual_str)?.with_timezone(&Utc);
                             let expected_dt =
                                 DateTime::parse_from_rfc3339(expected_str)?.with_timezone(&Utc);
-                            eyre::ensure!(actual_dt == expected_dt,
+                            anyhow::ensure!(actual_dt == expected_dt,
                                 "row {}, col '{}': timestamp mismatch. actual: {}, expected: {}. object: {:?}",
                                 row_idx, col_name, actual_dt, expected_dt, json_obj);
                         } else {
-                            eyre::ensure!(actual_val == expected_val,
+                            anyhow::ensure!(actual_val == expected_val,
                                 "row {}, col '{}': value mismatch. actual: {:?}, expected: {:?}. object: {:?}",
                                 row_idx, col_name, actual_val, expected_val, json_obj);
                         }
                     }
                     (Some(actual_val), None) => {
-                        eyre::ensure!(actual_val.is_null(),
+                        anyhow::ensure!(actual_val.is_null(),
                             "row {}, col '{}': actual value {:?} was not null, but expected null. object: {:?}",
                             row_idx, col_name, actual_val, json_obj);
                     }
                     (None, Some(expected_val)) => {
-                        eyre::bail!(
+                        anyhow::bail!(
                             "row {}, col '{}': key missing but expected value {:?}. object: {:?}",
                             row_idx,
                             col_name,
@@ -314,7 +314,7 @@ mod tests {
                         );
                     }
                     (None, None) => {
-                        eyre::bail!(
+                        anyhow::bail!(
                             "row {}, col '{}': key missing and expected null. this should be json!(null) instead of missing. object: {:?}",
                             row_idx, col_name, json_obj
                         );

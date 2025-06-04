@@ -5,7 +5,7 @@
 //! on the ai interaction flow, returning the final ai message and the last openai response id.
 
 use crate::{ai_interaction::tools::beacon_slot_check::BeaconNode, db::Db}; // import the db trait
-use eyre::{Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info, instrument};
 
@@ -78,7 +78,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
         Ok(api_response_1) => {
             openai_chat::start_ai_processing_loop(ctx, api_response_1, input_items)
                 .await
-                .wrap_err("core ai conversation processing loop failed")
+                .context("core ai conversation processing loop failed")
         }
         Err(e) => {
             error!(error = %e, "initial /v1/responses api call failed");

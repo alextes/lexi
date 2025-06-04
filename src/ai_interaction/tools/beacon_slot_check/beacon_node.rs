@@ -1,4 +1,4 @@
-use eyre::{eyre, Result};
+use anyhow::{anyhow, Result};
 use mockall::automock;
 use reqwest::{Client, StatusCode};
 use tracing::{error, info, instrument};
@@ -6,7 +6,7 @@ use tracing::{error, info, instrument};
 #[allow(async_fn_in_trait)]
 #[automock]
 pub trait BeaconNode {
-    async fn slot_status(&self, slot: u64) -> Result<StatusCode, eyre::Report>;
+    async fn slot_status(&self, slot: u64) -> Result<StatusCode>;
 }
 
 #[derive(Clone)]
@@ -26,7 +26,7 @@ impl BeaconNodeHttp {
 
 impl BeaconNode for BeaconNodeHttp {
     #[instrument(skip(self))]
-    async fn slot_status(&self, slot: u64) -> Result<StatusCode, eyre::Report> {
+    async fn slot_status(&self, slot: u64) -> Result<StatusCode> {
         let request_url = format!("{}/eth/v1/beacon/headers/{slot}", self.url);
         info!(url = %request_url, slot = %slot, "fetching beacon header status for slot");
 
@@ -37,7 +37,7 @@ impl BeaconNode for BeaconNodeHttp {
             }
             Err(e) => {
                 error!(slot = %slot, error = %e, "failed to send request to beacon node");
-                Err(eyre!(e))
+                Err(anyhow!(e))
             }
         }
     }

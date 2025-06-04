@@ -3,7 +3,7 @@
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
-use eyre::Result;
+use anyhow::Result;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -56,7 +56,7 @@ fn get_schema_content(db_name: &str) -> Result<String> {
             // this case should ideally be caught before calling this function,
             // but as a safeguard:
             error!("invalid database name {} for schema retrieval", db_name);
-            eyre::bail!("invalid database name for schema retrieval: {}", db_name)
+            anyhow::bail!("invalid database name for schema retrieval: {}", db_name)
         }
     }
 }

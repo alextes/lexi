@@ -10,7 +10,7 @@
 //! modules within the `lexi::bot` and `lexi::message_processor` crates/modules.
 //! this file lives at `src/bin/run_tg_bot.rs`.
 
-use eyre::{Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::time::Duration;
@@ -24,7 +24,6 @@ use lexi::telegram;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    color_eyre::install()?;
     dotenv::dotenv().ok();
 
     log::init();
@@ -57,7 +56,7 @@ async fn main() -> Result<()> {
     let bot_db_id = db_conn
         .upsert_user(&bot_user_from_api)
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!(
                 "failed to upsert bot's own user data (telegram_id: {}) into database",
                 bot_user_from_api.id

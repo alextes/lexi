@@ -8,7 +8,7 @@
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
-use eyre::Result;
+use anyhow::Result;
 use indoc::indoc;
 use serde_json::json;
 use std::collections::HashMap;
@@ -63,7 +63,7 @@ fn get_manual_content(manual_name: &str) -> Result<String> {
         }
         _ => {
             error!(%manual_name, "attempted to retrieve unknown manual");
-            eyre::bail!("unknown manual name: {}", manual_name)
+            anyhow::bail!("unknown manual name: {}", manual_name)
         }
     }
 }

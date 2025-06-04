@@ -6,7 +6,7 @@
 //! this file lives at `src/bot/loop.rs`.
 
 use crate::db::Db;
-use eyre::{Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
@@ -49,7 +49,7 @@ pub async fn run_bot_loop(
             .get(&get_updates_url)
             .send()
             .await
-            .wrap_err_with(|| {
+            .with_context(|| {
                 format!("failed to send getUpdates request to URL: {get_updates_url}")
             })?;
 
@@ -58,7 +58,7 @@ pub async fn run_bot_loop(
             let api_response = response
                 .json::<ApiResponse<Vec<Update>>>()
                 .await
-                .wrap_err("failed to parse json response from getUpdates")?;
+                .context("failed to parse json response from getUpdates")?;
 
             if api_response.ok {
                 if let Some(updates) = api_response.result {
@@ -94,7 +94,7 @@ pub async fn run_bot_loop(
                 if let Some(code) = api_response.error_code {
                     if code == 401 || code == 404 {
                         error!("critical telegram api error ({}). please check your token. exiting loop.", code);
-                        return Err(eyre::eyre!(
+                        return Err(anyhow::anyhow!(
                             "telegram API error {}: {}",
                             code,
                             api_response.description.unwrap_or_default()

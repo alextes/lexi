@@ -1,6 +1,6 @@
 pub mod types;
 
-use eyre::{eyre, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde::Serialize;
 
@@ -37,18 +37,18 @@ pub async fn send_message(
         .json(&params)
         .send()
         .await
-        .wrap_err_with(|| format!("failed to send POST request to {url}"))?;
+        .with_context(|| format!("failed to send POST request to {url}"))?;
 
     let status = response.status();
     if status.is_success() {
         let api_response = response
             .json::<ApiResponse<TelegramMessage>>()
             .await
-            .wrap_err_with(|| "failed to parse JSON response from sendMessage API")?;
+            .with_context(|| "failed to parse JSON response from sendMessage API")?;
 
         if api_response.ok {
             api_response.result.ok_or_else(|| {
-                eyre!("sendMessage API call was ok but no message was returned in result")
+                anyhow!("sendMessage API call was ok but no message was returned in result")
             })
         } else {
             let error_description = api_response
@@ -56,7 +56,7 @@ pub async fn send_message(
                 .unwrap_or_else(|| "unknown telegram api error".to_string());
             let error_code = api_response.error_code.unwrap_or(-1);
             tracing::error!(description = %error_description, code = error_code, "telegram sendMessage API error (ok=false)");
-            Err(eyre!(
+            Err(anyhow!(
                 "telegram sendMessage API error ({}): {}",
                 error_code,
                 error_description
@@ -65,7 +65,7 @@ pub async fn send_message(
     } else {
         let error_body = response.text().await.unwrap_or_default();
         tracing::error!(status = %status, body = %error_body, "http error during sendMessage");
-        Err(eyre!(
+        Err(anyhow!(
             "http error {} during sendMessage: {}",
             status,
             error_body
@@ -86,26 +86,26 @@ pub async fn get_me(
         .get(&url)
         .send()
         .await
-        .wrap_err_with(|| format!("failed to send GET request to {url}"))?;
+        .with_context(|| format!("failed to send GET request to {url}"))?;
 
     let status = response.status();
     if status.is_success() {
         let api_response = response
             .json::<ApiResponse<TelegramUser>>()
             .await
-            .wrap_err_with(|| "failed to parse JSON response from getMe API")?;
+            .with_context(|| "failed to parse JSON response from getMe API")?;
 
         if api_response.ok {
             api_response
                 .result
-                .ok_or_else(|| eyre!("getMe API call was ok but no user was returned in result"))
+                .ok_or_else(|| anyhow!("getMe API call was ok but no user was returned in result"))
         } else {
             let error_description = api_response
                 .description
                 .unwrap_or_else(|| "unknown telegram api error".to_string());
             let error_code = api_response.error_code.unwrap_or(-1);
             tracing::error!(description = %error_description, code = error_code, "telegram getMe API error (ok=false)");
-            Err(eyre!(
+            Err(anyhow!(
                 "telegram getMe API error ({}): {}",
                 error_code,
                 error_description
@@ -114,6 +114,10 @@ pub async fn get_me(
     } else {
         let error_body = response.text().await.unwrap_or_default();
         tracing::error!(status = %status, body = %error_body, "http error during getMe");
-        Err(eyre!("http error {} during getMe: {}", status, error_body))
+        Err(anyhow!(
+            "http error {} during getMe: {}",
+            status,
+            error_body
+        ))
     }
 }

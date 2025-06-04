@@ -14,7 +14,7 @@ use crate::{
         OutputFunctionCall, OutputItem, ToolDefinition,
     },
 };
-use eyre::Result;
+use anyhow::Result;
 use indoc::indoc;
 use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, instrument, warn};
@@ -248,7 +248,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                 }
                 Err(e) => {
                     error!(response_id = %current_response_id, error= %e, "api call after tool results failed.");
-                    return Err(eyre::eyre!("api call after tool results failed: {}", e));
+                    return Err(anyhow::anyhow!("api call after tool results failed: {}", e));
                 }
             }
         } else if let Some(final_text) = assistant_text_content_this_turn {

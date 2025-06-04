@@ -1,5 +1,5 @@
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use eyre::{Context, ContextCompat, Result};
 use mockall::automock;
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use std::str::FromStr;
@@ -42,13 +42,13 @@ pub struct PostgresDb {
 impl PostgresDb {
     pub async fn new(database_url: &str) -> Result<Self> {
         let options = PgConnectOptions::from_str(database_url)
-            .wrap_err_with(|| format!("failed to parse database_url: '{database_url}'"))?;
+            .with_context(|| format!("failed to parse database_url: '{database_url}'"))?;
 
         let pool = PgPoolOptions::new()
             .max_connections(10)
             .connect_with(options)
             .await
-            .wrap_err_with(|| {
+            .with_context(|| {
                 format!("failed to connect to postgresql database at {database_url}")
             })?;
 
@@ -56,7 +56,7 @@ impl PostgresDb {
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
-            .wrap_err_with(|| "failed to run database migrations")?;
+            .with_context(|| "failed to run database migrations")?;
         tracing::info!("database migrations complete (postgresql).");
 
         Ok(PostgresDb { pool })
@@ -87,7 +87,7 @@ impl Db for PostgresDb {
         )
         .fetch_one(&self.pool)
         .await
-        .wrap_err_with(|| format!("failed to upsert user with telegram_id {}", user_data.id))?;
+        .with_context(|| format!("failed to upsert user with telegram_id {}", user_data.id))?;
 
         Ok(query_result.id)
     }
@@ -113,7 +113,7 @@ impl Db for PostgresDb {
         )
         .fetch_one(&self.pool)
         .await
-        .wrap_err_with(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
+        .with_context(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
 
         Ok(query_result.id)
     }
@@ -129,8 +129,8 @@ impl Db for PostgresDb {
         local_user_id: i32,
         raw_message_json: &str,
     ) -> Result<i32> {
-        let sent_at_datetime = DateTime::<Utc>::from_timestamp(message_data.date, 0)
-            .wrap_err_with(|| {
+        let sent_at_datetime =
+            DateTime::<Utc>::from_timestamp(message_data.date, 0).with_context(|| {
                 format!(
                     "failed to convert telegram message date {} to naivedatetime",
                     message_data.date
@@ -153,7 +153,7 @@ impl Db for PostgresDb {
         )
         .fetch_optional(&self.pool)
         .await
-        .wrap_err_with(|| format!("failed to execute insert_or_do_nothing for message with telegram_message_id {}", message_data.message_id))?;
+        .with_context(|| format!("failed to execute insert_or_do_nothing for message with telegram_message_id {}", message_data.message_id))?;
 
         if let Some(row) = insert_result {
             tracing::debug!(
@@ -176,7 +176,7 @@ impl Db for PostgresDb {
             )
             .fetch_one(&self.pool)
             .await
-            .wrap_err_with(|| format!("failed to fetch id for existing message (tg_id: {}, chat_id: {}) after insert_or_do_nothing", message_data.message_id, local_chat_id))?;
+            .with_context(|| format!("failed to fetch id for existing message (tg_id: {}, chat_id: {}) after insert_or_do_nothing", message_data.message_id, local_chat_id))?;
             Ok(existing_row.id)
         }
     }
@@ -203,7 +203,7 @@ impl Db for PostgresDb {
         )
         .fetch_all(&self.pool)
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!(
                 "failed to fetch message history for chat_id {local_chat_id} with limit {limit}"
             )
@@ -221,7 +221,7 @@ impl Db for PostgresDb {
         )
         .fetch_one(&self.pool)
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!("failed to fetch last_openai_response_id for chat_id {local_chat_id}")
         })?;
         Ok(result.last_openai_response_id)
@@ -240,7 +240,7 @@ impl Db for PostgresDb {
         )
         .execute(&self.pool)
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!(
                 "failed to update last_openai_response_id for chat_id {local_chat_id} to {response_id}"
             )
@@ -256,7 +256,7 @@ impl Db for PostgresDb {
         )
         .execute(&self.pool)
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!("failed to clear last_openai_response_id for chat_id {local_chat_id}")
         })?;
         Ok(())

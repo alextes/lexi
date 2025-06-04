@@ -18,7 +18,7 @@ use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::db::Db;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
-use eyre::{Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use serde_json::Value;
@@ -115,7 +115,7 @@ pub async fn send_reply_and_update_state<D: Db>(
         reply_text,
     )
     .await
-    .wrap_err_with(|| format!("failed to send final reply to chat_id {telegram_chat_id}"))?;
+    .with_context(|| format!("failed to send final reply to chat_id {telegram_chat_id}"))?;
 
     let bot_reply_raw_json = serde_json_to_string(&sent_bot_message)
         .context("failed to serialize bot reply message to json")?;
@@ -127,7 +127,7 @@ pub async fn send_reply_and_update_state<D: Db>(
             &bot_reply_raw_json,
         )
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!(
                 "failed to insert bot final reply (id: {}) into database",
                 sent_bot_message.message_id
@@ -186,17 +186,17 @@ pub async fn handle_telegram_update<D: Db + Clone>(
         };
 
         let local_user_id =
-            ctx.db.upsert_user(sender_data).await.wrap_err_with(|| {
+            ctx.db.upsert_user(sender_data).await.with_context(|| {
                 format!("upserting user (telegram_id: {}) failed", sender_data.id)
             })?;
 
         let chat_data = &incoming_message.chat;
         let local_chat_id_for_conversation =
-            ctx.db.upsert_chat(chat_data).await.wrap_err_with(|| {
+            ctx.db.upsert_chat(chat_data).await.with_context(|| {
                 format!("upserting chat (telegram_id: {}) failed", chat_data.id)
             })?;
 
-        let raw_message_json = serde_json_to_string(incoming_message).wrap_err_with(|| {
+        let raw_message_json = serde_json_to_string(incoming_message).with_context(|| {
             format!(
                 "serializing message (id: {}) to json failed",
                 incoming_message.message_id
@@ -211,7 +211,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 &raw_message_json,
             )
             .await
-            .wrap_err_with(|| {
+            .with_context(|| {
                 format!(
                     "inserting incoming message (id: {}) failed",
                     incoming_message.message_id
@@ -255,7 +255,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     None,
                 )
                 .await
-                .wrap_err("failed to send/store acknowledgement for empty prompt")?;
+                .context("failed to send/store acknowledgement for empty prompt")?;
             } else if !prompt_text.is_empty() {
                 let previous_response_id_opt_string = match ctx
                     .db
@@ -344,7 +344,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 &final_message_to_send,
                             )
                             .await
-                            .wrap_err("failed to send conversation reset confirmation message")?;
+                            .context("failed to send conversation reset confirmation message")?;
                             if let Err(e) = ctx
                                 .db
                                 .clear_last_openai_response_id(local_chat_id_for_conversation)

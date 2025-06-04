@@ -2,7 +2,7 @@ use crate::env::ENV_CONFIG;
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
-use eyre::Result;
+use anyhow::Result;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::LazyLock;
