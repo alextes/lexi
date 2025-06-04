@@ -62,9 +62,9 @@ fn parse_slot_number_arg(arguments_json_str: &str) -> Result<u64, String> {
 }
 
 #[instrument(skip(arguments_json_str, beacon_node))]
-pub async fn execute_beacon_slot_check<BN: BeaconNode + ?Sized>(
+pub async fn execute_beacon_slot_check<B: BeaconNode>(
+    beacon_node: &B,
     arguments_json_str: &str,
-    beacon_node: &BN,
 ) -> Result<String> {
     info!(args = %arguments_json_str, "executing check_beacon_slot_missed tool");
 
@@ -207,7 +207,7 @@ mod tests {
             .returning(|_| Ok(StatusCode::OK));
 
         let args = json!({ "slot_number": slot_number }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "not_missed",
             "message": "a block header was found for the specified slot."
@@ -227,7 +227,7 @@ mod tests {
             .returning(|_| Ok(StatusCode::NOT_FOUND));
 
         let args = json!({ "slot_number": slot_number }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "missed",
             "message": "the specified slot was missed (no block header found)."
@@ -247,11 +247,11 @@ mod tests {
             .returning(|_| Ok(StatusCode::INTERNAL_SERVER_ERROR));
 
         let args = json!({ "slot_number": slot_number }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "error",
             "message": "an error occurred while checking the slot.",
-            "details": "beacon node responded with http status: 500 internal server error"
+            "details": "beacon node responded with http status: 500 Internal Server Error"
         })
         .to_string();
         assert_eq!(result, expected_json);
@@ -272,7 +272,7 @@ mod tests {
             });
 
         let args = json!({ "slot_number": slot_number }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "error",
             "message": "an error occurred while checking the slot.",
@@ -287,7 +287,7 @@ mod tests {
         mock_bn.expect_slot_status().times(0);
 
         let args = json!({ "slot_number": "not_a_number" }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "error",
             "message": "invalid_argument",
@@ -303,7 +303,7 @@ mod tests {
         mock_bn.expect_slot_status().times(0);
 
         let args = json!({ "other_arg": 123 }).to_string();
-        let result = execute_beacon_slot_check(&args, &mock_bn).await.unwrap();
+        let result = execute_beacon_slot_check(&mock_bn, &args).await.unwrap();
         let expected_json = json!({
             "status": "error",
             "message": "invalid_argument",
@@ -319,7 +319,7 @@ mod tests {
         mock_bn.expect_slot_status().times(0);
 
         let malformed_args = "not json";
-        let result = execute_beacon_slot_check(malformed_args, &mock_bn)
+        let result = execute_beacon_slot_check(&mock_bn, malformed_args)
             .await
             .unwrap();
         let result_json: JsonValue = serde_json::from_str(&result).unwrap();

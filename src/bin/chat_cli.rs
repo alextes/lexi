@@ -8,6 +8,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use lexi::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
+use lexi::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use lexi::ai_interaction::{self, HandlerContext as AiInteractionHandlerContext}; // Aliasing for clarity
 use lexi::env::ENV_CONFIG;
 use lexi::log;
@@ -60,13 +61,21 @@ async fn main() -> Result<()> {
         http_client: &http_client,
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
         openai_api_key: &openai_api_key,
-        beacon_base_url: ENV_CONFIG.beacon_url.clone().unwrap_or_default(),
-        relay_admin_base_url: ENV_CONFIG.relay_admin_url.clone().unwrap_or_default(),
         beacon_node: BeaconNodeHttp::new(
             ENV_CONFIG
                 .beacon_url
                 .clone()
                 .expect("BEACON_URL is required in env config."),
+        ),
+        relay_circuit_breaker: RelayCircuitBreaker::new(
+            ENV_CONFIG
+                .relay_admin_token
+                .clone()
+                .expect("RELAY_ADMIN_TOKEN is required in env config."),
+            ENV_CONFIG
+                .relay_url
+                .clone()
+                .expect("RELAY_URL is required in env config."),
         ),
     };
 
@@ -76,12 +85,8 @@ async fn main() -> Result<()> {
         cli.logging_chat_id
     );
 
-    match ai_interaction::process_single_prompt_for_cli(
-        &ai_interaction_handler_ctx,
-        &cli.prompt,
-        cli.logging_chat_id,
-    )
-    .await
+    match ai_interaction::process_single_prompt_for_cli(&ai_interaction_handler_ctx, &cli.prompt)
+        .await
     {
         Ok((final_text, response_id)) => {
             info!(

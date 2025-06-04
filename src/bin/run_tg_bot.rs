@@ -67,12 +67,5 @@ async fn main() -> Result<()> {
         bot_db_id, "bot user data upserted into database"
     );
 
-    run_bot_loop(
-        db_conn,
-        bot_token,
-        reqwest_client,
-        openai_api_key,
-        bot_db_id,
-    )
-    .await
+    run_bot_loop(db_conn, bot_token, openai_api_key, bot_db_id).await
 }

@@ -112,7 +112,7 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
     let arguments = &fc_request.arguments;
 
     if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
-        beacon_slot_check::execute_beacon_slot_check(arguments, &ctx.beacon_node).await
+        beacon_slot_check::execute_beacon_slot_check(&ctx.beacon_node, arguments).await
     } else if tool_name == db_schema::DATABASE_SCHEMA_TOOL_NAME {
         db_schema::execute_get_database_schema(arguments).await
     } else if tool_name == db_query::MEVDB_TOOL_NAME {
@@ -123,6 +123,12 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
         conversation_admin::execute_conversation_admin_command(arguments).await
     } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {
         retrieve_manual::execute_retrieve_manual(arguments).await
+    } else if tool_name == relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL_NAME {
+        relay_circuit_breaker::execute_relay_circuit_breaker_tool(
+            &ctx.relay_circuit_breaker,
+            arguments,
+        )
+        .await
     } else {
         warn!("received unexpected tool name for execution");
         Ok(format!(

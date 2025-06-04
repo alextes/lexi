@@ -19,16 +19,17 @@ pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 pub async fn run_bot_loop(
     db: impl Db + Clone,
     bot_token: String,
-    http_client: ReqwestClient,
     openai_api_key: String,
     bot_db_id: i32,
 ) -> Result<()> {
     let mut last_update_id = 0;
     info!(bot_db_id, "bot loop started. listening for updates...");
 
+    let telegram_http_client = ReqwestClient::new();
+
     let bot_ctx = BotContext {
         db,
-        http_client: http_client.clone(),
+        http_client: telegram_http_client.clone(),
         api_base_url: TELEGRAM_API_URL,
         bot_token: &bot_token,
         bot_db_id,
@@ -45,7 +46,7 @@ pub async fn run_bot_loop(
 
         debug!("requesting updates: {}", get_updates_url);
 
-        let response = http_client
+        let response = telegram_http_client
             .get(&get_updates_url)
             .send()
             .await

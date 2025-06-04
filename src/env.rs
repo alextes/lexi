@@ -69,6 +69,10 @@ pub struct EnvConfig {
     pub log_perf: bool,
     /// url of the mevdb database (optional)
     pub mevdb_database_url: Option<String>,
+    /// the token for the relay admin api e.g. ab345678ij
+    pub relay_admin_token: Option<String>,
+    /// url of the relay api e.g. https://relay.ultrasound.money
+    pub relay_url: Option<String>,
 }
 
 #[must_use]
@@ -81,6 +85,8 @@ pub fn get_env_config() -> EnvConfig {
         log_json: get_env_bool("LOG_JSON").unwrap_or(false),
         log_perf: get_env_bool("LOG_PERF").unwrap_or(false),
         mevdb_database_url: get_env_var("MEVDB_DATABASE_URL"),
+        relay_admin_token: get_env_var("RELAY_ADMIN_TOKEN"),
+        relay_url: get_env_var("RELAY_URL"),
     }
 }
 

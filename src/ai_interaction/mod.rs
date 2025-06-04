@@ -4,7 +4,12 @@
 //! it is designed to be independent of the calling context (e.g., telegram, cli) and focuses solely
 //! on the ai interaction flow, returning the final ai message and the last openai response id.
 
-use crate::{ai_interaction::tools::beacon_slot_check::BeaconNode, db::Db}; // import the db trait
+use crate::{
+    ai_interaction::tools::{
+        beacon_slot_check::BeaconNode, relay_circuit_breaker::RelayCircuitBreaker,
+    },
+    db::Db,
+}; // import the db trait
 use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info, instrument};
@@ -32,16 +37,14 @@ pub struct HandlerContext<'a, D: Db, B: BeaconNode> {
     pub http_client: &'a ReqwestClient,
     pub bot_db_id: i32, // kept as some tools/logging might still reference it via context
     pub openai_api_key: &'a str,
-    pub beacon_base_url: String,      // Added for beacon node base URL
-    pub relay_admin_base_url: String, // Added for relay admin base URL
     pub beacon_node: B,
+    pub relay_circuit_breaker: RelayCircuitBreaker,
 }
 
-#[instrument(skip(ctx, prompt_text, previous_response_id), fields(logging_chat_id = %logging_chat_id))]
+#[instrument(skip(ctx, prompt_text, previous_response_id))]
 pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     ctx: &HandlerContext<'_, D, B>,
     prompt_text: &str,
-    logging_chat_id: i64, // This is used for logging within openai_chat and its tools
     previous_response_id: Option<&str>,
 ) -> Result<AiConversationOutcome> {
     info!(
@@ -87,17 +90,16 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     }
 }
 
-#[instrument(skip(ctx, prompt_text), fields(telegram_chat_id = %telegram_chat_id))]
+#[instrument(skip(ctx, prompt_text))]
 pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
     ctx: &HandlerContext<'_, D, B>,
     prompt_text: &str,
-    telegram_chat_id: i64,
 ) -> Result<(String, String)> {
     info!(
         prompt = prompt_text,
         "processing single prompt via core ai driver"
     );
-    match drive_ai_conversation(ctx, prompt_text, telegram_chat_id, None).await {
+    match drive_ai_conversation(ctx, prompt_text, None).await {
         Ok(outcome) => match outcome {
             AiConversationOutcome::TextMessage(message, response_id) => Ok((message, response_id)),
             AiConversationOutcome::ResetConversation(message, response_id) => {
