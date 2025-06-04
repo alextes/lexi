@@ -14,11 +14,12 @@ use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info, instrument};
 
+use crate::env::ENV_CONFIG;
 use crate::openai_api::{
     call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
 };
 use openai_chat::DEFAULT_OPENAI_MODEL_ID;
-use openai_chat::OPENAI_CALL_CONFIG; // import the default model ID
+use openai_chat::OPENAI_CALL_CONFIG; // import the default model ID // Added import for ENV_CONFIG
 
 // added imports for global model id store
 use std::sync::LazyLock;
@@ -85,10 +86,18 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
         content: prompt_text.to_string(),
     })];
 
+    // determine tools *before* the first API call
+    let turn_specific_tools = openai_chat::determine_turn_tools(
+        &input_items,
+        &OPENAI_CALL_CONFIG.available_tools,
+        ENV_CONFIG.bot_admin_code.as_deref(),
+        current_model_id,
+    );
+
     let initial_api_args = CallResponsesApiOptionalArgs {
         model_id: current_model_id,
         previous_response_id,
-        tools: Some(OPENAI_CALL_CONFIG.available_tools.clone()),
+        tools: Some(turn_specific_tools.clone()), // use the determined tools
         tool_choice: None,
         instructions: Some(&OPENAI_CALL_CONFIG.instructions),
         temperature: None,
@@ -108,6 +117,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
             api_response_1,
             input_items,
             current_model_id.to_string(),
+            turn_specific_tools, // pass the determined tools
         )
         .await
         .context("core ai conversation processing loop failed"),

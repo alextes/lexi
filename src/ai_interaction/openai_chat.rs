@@ -298,7 +298,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
 /// determines the specific set of tools available for the current turn.
 /// it starts with a base set of tools and may add context-specific tools
 /// like the conversation_admin_tool if certain conditions (e.g., admin code in user message) are met.
-fn determine_turn_tools(
+pub(crate) fn determine_turn_tools(
     initial_input_items: &[InputItem],
     base_available_tools: &[ApiToolType],
     bot_admin_code: Option<&str>,
@@ -369,15 +369,8 @@ pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
     current_model_id: String,
+    turn_specific_available_tools: Vec<ApiToolType>,
 ) -> Result<AiConversationOutcome> {
-    // determine tools for this specific turn
-    let turn_specific_available_tools = determine_turn_tools(
-        &initial_input_items,
-        &OPENAI_CALL_CONFIG.available_tools,
-        ENV_CONFIG.bot_admin_code.as_deref(), // Pass the admin code from ENV_CONFIG
-        &current_model_id,
-    );
-
     process_openai_response_loop(
         ctx,
         initial_api_response,
