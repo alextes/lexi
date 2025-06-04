@@ -19,6 +19,10 @@ use indoc::indoc;
 use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, instrument, warn};
 
+// add these imports
+use crate::ai_interaction::tools::conversation_admin;
+use crate::env::ENV_CONFIG;
+
 pub const OPENAI_RESPONSES_MODEL_ID: &str = "gpt-4.1";
 
 use std::sync::LazyLock;
@@ -35,7 +39,6 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         super::tools::db_schema::DATABASE_SCHEMA_TOOL.clone(),
         super::tools::db_query::MEVDB_QUERY_TOOL.clone(),
         super::tools::db_query::GLOBALDB_QUERY_TOOL.clone(),
-        super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
         super::tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
         super::tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
     ];
@@ -285,16 +288,72 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
     }
 }
 
+/// determines the specific set of tools available for the current turn.
+/// it starts with a base set of tools and may add context-specific tools
+/// like the conversation_admin_tool if certain conditions (e.g., admin code in user message) are met.
+fn determine_turn_tools(
+    initial_input_items: &[InputItem],
+    base_available_tools: &[ToolDefinition],
+    bot_admin_code: Option<&str>,
+) -> Vec<ToolDefinition> {
+    let mut turn_specific_available_tools = base_available_tools.to_vec();
+
+    if let Some(expected_admin_code_val) = bot_admin_code {
+        let admin_trigger_phrase = format!("admin code {}", expected_admin_code_val);
+
+        if let Some(last_user_message_content) = initial_input_items.iter().rev().find_map(|item| {
+            if let InputItem::Message(msg) = item {
+                if msg.role == "user" {
+                    return Some(&msg.content);
+                }
+            }
+            None
+        }) {
+            if last_user_message_content.contains(&admin_trigger_phrase) {
+                info!(
+                    "admin phrase with correct code detected. \'{}\' will be added to available tools for this turn.",
+                    conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                );
+                if !turn_specific_available_tools
+                    .iter()
+                    .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
+                {
+                    turn_specific_available_tools
+                        .push(conversation_admin::CONVERSATION_ADMIN_TOOL.clone());
+                }
+            } else {
+                info!(
+                    "admin code is configured, but trigger phrase not found or incorrect in user message. \'{}\' will not be added.",
+                    conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                );
+            }
+        }
+    } else {
+        info!(
+            "no bot_admin_code is configured. \'{}\' will not be available.",
+            conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+        );
+    }
+    turn_specific_available_tools
+}
+
 pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
     ctx: &super::HandlerContext<'_, D, B>,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
 ) -> Result<AiConversationOutcome> {
+    // determine tools for this specific turn
+    let turn_specific_available_tools = determine_turn_tools(
+        &initial_input_items,
+        &OPENAI_CALL_CONFIG.available_tools,
+        ENV_CONFIG.bot_admin_code.as_deref(), // Pass the admin code from ENV_CONFIG
+    );
+
     process_openai_response_loop(
         ctx,
         initial_api_response,
         initial_input_items,
-        OPENAI_CALL_CONFIG.available_tools.clone(),
+        turn_specific_available_tools,
         &OPENAI_CALL_CONFIG.instructions,
     )
     .await
@@ -302,18 +361,13 @@ pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
 
 #[cfg(test)]
 mod tests {
-    use super::*; // imports functions from openai_chat.rs
+    use super::*;
+    use crate::ai_interaction::tools::conversation_admin;
     use crate::openai_api::{
-        // imports types for constructing test data
-        FunctionCallOutputItem,
-        InputMessageObject,
-        OutputFunctionCall,
-        OutputItem,
-        OutputMessage,
-        OutputTextContent,
+        FunctionCallOutputItem, InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage,
+        OutputTextContent, ToolDefinition,
     };
 
-    // --- tests for summarize_conversation_history ---
     #[test]
     fn test_summarize_empty_history() {
         let history: Vec<InputItem> = Vec::new();
@@ -543,5 +597,176 @@ mod tests {
         let (fcs, text) = parse_api_response_output(items);
         assert!(fcs.is_empty());
         assert_eq!(text, Some("part one.\npart two.".to_string()));
+    }
+
+    // --- tests for determine_turn_tools ---
+    // helper to create a dummy tool definition
+    fn dummy_tool(name: &str) -> ToolDefinition {
+        ToolDefinition::new(name.to_string(), Some("description".to_string()), None)
+    }
+
+    #[test]
+    fn dtt_admin_code_not_provided() {
+        // dtt = determine_turn_tools
+        let base_tools = vec![dummy_tool("base_tool_1")];
+        let inputs: Vec<InputItem> = vec![];
+        let bot_admin_code: Option<&str> = None;
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(determined_tools.len(), 1);
+        assert!(determined_tools.iter().any(|t| t.name == "base_tool_1"));
+        assert!(!determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+    }
+
+    #[test]
+    fn dtt_admin_code_provided_no_trigger_phrase_in_message() {
+        let base_tools = vec![dummy_tool("base_tool_2")];
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: "hello there, a normal message".to_string(),
+        })];
+        let bot_admin_code = Some("secret123");
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(determined_tools.len(), 1);
+        assert!(determined_tools.iter().any(|t| t.name == "base_tool_2"));
+        assert!(!determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+    }
+
+    #[test]
+    fn dtt_admin_code_provided_with_trigger_phrase_in_latest_user_message() {
+        let admin_secret = "supersecret";
+        let base_tools = vec![dummy_tool("base_tool_3")];
+        let inputs = vec![
+            InputItem::Message(InputMessageObject {
+                // older assistant message
+                role: "assistant".to_string(),
+                content: "i am an assistant".to_string(),
+            }),
+            InputItem::Message(InputMessageObject {
+                // latest user message with code
+                role: "user".to_string(),
+                content: format!("special request: admin code {}", admin_secret),
+            }),
+        ];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(
+            determined_tools.len(),
+            2,
+            "expected base_tool_3 and admin_tool"
+        );
+        assert!(determined_tools.iter().any(|t| t.name == "base_tool_3"));
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+    }
+
+    #[test]
+    fn dtt_admin_code_provided_but_no_user_message_in_inputs() {
+        let base_tools = vec![dummy_tool("another_base_tool")];
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "assistant".to_string(), // no user message
+            content: "i am an assistant, no user input yet".to_string(),
+        })];
+        let bot_admin_code = Some("anothersecret");
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(determined_tools.len(), 1);
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == "another_base_tool"));
+        assert!(!determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+    }
+
+    #[test]
+    fn dtt_admin_code_provided_trigger_phrase_not_in_latest_user_message() {
+        let admin_secret = "oldschool";
+        let base_tools = vec![dummy_tool("base_tool_4")];
+        let inputs = vec![
+            InputItem::Message(InputMessageObject {
+                role: "user".to_string(),
+                content: format!("my admin code {} was for an old task", admin_secret), // Older user message with code
+            }),
+            InputItem::Message(InputMessageObject {
+                role: "assistant".to_string(),
+                content: "i replied to that.".to_string(),
+            }),
+            InputItem::Message(InputMessageObject {
+                role: "user".to_string(),
+                content: "this is the latest user message, no code here please".to_string(), // Latest user message, no code
+            }),
+        ];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(
+            determined_tools.len(),
+            1,
+            "admin tool should not be added if phrase is not in the *latest* user message"
+        );
+        assert!(determined_tools.iter().any(|t| t.name == "base_tool_4"));
+        assert!(!determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
+    }
+
+    #[test]
+    fn dtt_admin_tool_already_in_base_tools_and_code_provided_with_trigger() {
+        // this tests the idempotency if admin tool was already in base_tools for some reason
+        let admin_secret = "yetanother";
+        let mut base_tools = vec![dummy_tool("base_tool_5")];
+        base_tools.push(conversation_admin::CONVERSATION_ADMIN_TOOL.clone()); // admin tool already present
+
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: format!("give me admin access with admin code {}", admin_secret),
+        })];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(
+            determined_tools.len(),
+            2,
+            "should contain base_tool_5 and only one instance of admin_tool"
+        );
+        assert_eq!(
+            determined_tools
+                .iter()
+                .filter(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
+                .count(),
+            1,
+            "admin_tool should only appear once"
+        );
+        assert!(determined_tools.iter().any(|t| t.name == "base_tool_5"));
+    }
+
+    #[test]
+    fn dtt_empty_base_tools_admin_code_provided_with_trigger() {
+        let admin_secret = "for_empty_base";
+        let base_tools: Vec<ToolDefinition> = Vec::new(); // No base tools
+
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: format!("admin code {} for action", admin_secret),
+        })];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        assert_eq!(
+            determined_tools.len(),
+            1,
+            "only admin_tool should be present"
+        );
+        assert!(determined_tools
+            .iter()
+            .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME));
     }
 }
