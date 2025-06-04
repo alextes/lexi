@@ -97,20 +97,16 @@ pub struct ToolFunctionParameters {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolDefinition {
     pub r#type: String, // Will always be "function"
-    pub name: String,   // Changed from Option<String>
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: String,
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<ToolFunctionParameters>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<bool>,
 }
 
 impl ToolDefinition {
     #[must_use]
     pub fn new(
-        // Renamed for clarity if needed, but new() is fine if it's the primary way for function tools
-        name: String, // Changed from Option<String>
+        name: String,
         description: Option<String>,
         parameters: Option<ToolFunctionParameters>,
     ) -> Self {
@@ -122,8 +118,8 @@ impl ToolDefinition {
         }
 
         ToolDefinition {
-            r#type: "function".to_string(), // Hardcoded for function tools
-            name,                           // No longer Some(name)
+            r#type: "function".to_string(),
+            name,
             description,
             parameters: updated_parameters,
             strict: Some(true),

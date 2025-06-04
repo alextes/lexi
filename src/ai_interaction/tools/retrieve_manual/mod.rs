@@ -29,12 +29,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     params_props.insert(
         "manual_name".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
-            .description(indoc!{"
-                the name of the manual to retrieve. available manuals:
-                'generate_proposer_reimbursement' (explains how to generate a proposer reimbursement).
-                'relay_dynamics' (explains the ultra sound relay, and gives context on bids, headers, block builders, adjustments, optimistic simulation, node operators, proposers, and how the relay earns. when asked about anything related to these its often good to fetch the manual first).
-            "}
-            )
+            .description("the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement', 'relay_dynamics'"            )
             .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME, RELAY_DYNAMICS_MANUAL_NAME])
             .build(),
     );
@@ -47,8 +42,13 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     ToolDefinition::new(
         RETRIEVE_MANUAL_TOOL_NAME.to_string(),
         Some(
-            "retrieves the content of a specified manual. this tool provides access to instructional documents for various tasks."
-                .to_string(),
+            indoc! {"
+                retrieves the content of a specified manual. this tool provides access to instructional documents for various tasks.
+                available manuals:
+                1. 'generate_proposer_reimbursement' - explains how to generate a proposer reimbursement.
+                2. 'relay_dynamics' - gives context on ultra sound relay, bids, headers, block builders, adjustments, optimistic simulation, node operators, proposers, and how the relay earns revenue. when asked about anything related to these topics or the relay, make sure you've fetched the manual at least once.
+            "}
+            .to_string(),
         ),
         Some(tool_params),
     )

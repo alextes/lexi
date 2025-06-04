@@ -396,9 +396,9 @@ mod tests {
     use crate::openai_api::{
         ApiToolType, InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage,
         OutputTextContent, ToolDefinition, WebSearchToolConfig,
-    }; // Added for tests if they need to simulate ENV_CONFIG
+    };
 
-    const TEST_GPT_4_1_MODEL_ID: &str = "gpt-4.1"; // Using existing DEFAULT_OPENAI_MODEL_ID
+    const TEST_GPT_4_1_MODEL_ID: &str = "gpt-4.1";
     const TEST_O4_MINI_MODEL_ID: &str = "o4-mini";
     const TEST_O3_MODEL_ID: &str = "o3";
 
