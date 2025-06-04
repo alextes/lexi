@@ -27,3 +27,7 @@ this is how the ultra sound relay team makes money. the relay will attempt last 
 ## geography
 
 some tables will feature a `geo` column. ultra sound operates block auctions in multiple regions, so far `rbx` and `vin`. this column will indicate where a builder block submission was received, or where a proposer header was given out.
+
+## proposers
+
+when asked information about the proposer, you usually need to work from a proposer_pubkey or pubkey column in a proposer table, from there you can use `proposer_labels_with_imputed_data_view` in mevdb + the `pubkey` column to find the `label` which is the proposer or node operator name. `validators` in mevdb also contains proposer information. validator is a synonym for proposer. node operators are professional companies which manage many proposers.
