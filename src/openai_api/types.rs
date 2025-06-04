@@ -139,6 +139,12 @@ pub struct WebSearchToolConfig {
                         // Potentially: pub search_context_size: Option<SearchContextSizeConfig>,
 }
 
+impl Default for WebSearchToolConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSearchToolConfig {
     pub fn new() -> Self {
         WebSearchToolConfig {
