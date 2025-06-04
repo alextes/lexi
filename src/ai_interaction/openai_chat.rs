@@ -302,6 +302,7 @@ fn determine_turn_tools(
     initial_input_items: &[InputItem],
     base_available_tools: &[ApiToolType],
     bot_admin_code: Option<&str>,
+    current_model_id: &str,
 ) -> Vec<ApiToolType> {
     let mut turn_specific_available_tools = base_available_tools.to_vec();
 
@@ -345,6 +346,21 @@ fn determine_turn_tools(
             tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
         );
     }
+
+    // Conditionally remove WebSearch tool if model is not gpt-4.1
+    if current_model_id != DEFAULT_OPENAI_MODEL_ID {
+        info!(
+            model_id = %current_model_id,
+            "websearch tool is not supported for this model and will be removed."
+        );
+        turn_specific_available_tools.retain(|tool| !matches!(tool, ApiToolType::WebSearch(_)));
+    } else {
+        info!(
+            model_id = %current_model_id,
+            "websearch tool is supported for this model and will be included if present in base tools."
+        );
+    }
+
     turn_specific_available_tools
 }
 
@@ -359,6 +375,7 @@ pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
         &initial_input_items,
         &OPENAI_CALL_CONFIG.available_tools,
         ENV_CONFIG.bot_admin_code.as_deref(), // Pass the admin code from ENV_CONFIG
+        &current_model_id,
     );
 
     process_openai_response_loop(
@@ -379,7 +396,11 @@ mod tests {
     use crate::openai_api::{
         ApiToolType, InputMessageObject, OutputFunctionCall, OutputItem, OutputMessage,
         OutputTextContent, ToolDefinition, WebSearchToolConfig,
-    };
+    }; // Added for tests if they need to simulate ENV_CONFIG
+
+    const TEST_GPT_4_1_MODEL_ID: &str = "gpt-4.1"; // Using existing DEFAULT_OPENAI_MODEL_ID
+    const TEST_O4_MINI_MODEL_ID: &str = "o4-mini";
+    const TEST_O3_MODEL_ID: &str = "o3";
 
     #[test]
     fn test_parse_empty_output_items() {
@@ -537,7 +558,8 @@ mod tests {
         let inputs: Vec<InputItem> = vec![];
         let bot_admin_code: Option<&str> = None;
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(determined_tools.len(), 1);
         assert!(determined_tools.iter().any(|t| match t {
             ApiToolType::Function(f) => f.name == "base_tool_1",
@@ -558,7 +580,8 @@ mod tests {
         })];
         let bot_admin_code = Some("secret123");
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(determined_tools.len(), 1);
         assert!(determined_tools.iter().any(|t| match t {
             ApiToolType::Function(f) => f.name == "base_tool_2",
@@ -588,7 +611,8 @@ mod tests {
         ];
         let bot_admin_code = Some(admin_secret);
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(
             determined_tools.len(),
             2,
@@ -613,7 +637,8 @@ mod tests {
         })];
         let bot_admin_code = Some("anothersecret");
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(determined_tools.len(), 1);
         assert!(determined_tools.iter().any(|t| match t {
             ApiToolType::Function(f) => f.name == "another_base_tool",
@@ -645,7 +670,8 @@ mod tests {
         ];
         let bot_admin_code = Some(admin_secret);
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(
             determined_tools.len(),
             1,
@@ -676,7 +702,8 @@ mod tests {
         })];
         let bot_admin_code = Some(admin_secret);
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(
             determined_tools.len(),
             2,
@@ -711,7 +738,8 @@ mod tests {
         })];
         let bot_admin_code = Some(admin_secret);
 
-        let determined_tools = determine_turn_tools(&inputs, &base_tools, bot_admin_code);
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_GPT_4_1_MODEL_ID);
         assert_eq!(
             determined_tools.len(),
             1,
@@ -719,6 +747,156 @@ mod tests {
         );
         assert!(determined_tools.iter().any(|t| match t {
             ApiToolType::Function(f) => f.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
+    }
+
+    // --- new tests for websearch tool based on model_id ---
+    fn web_search_tool() -> ApiToolType {
+        ApiToolType::WebSearch(WebSearchToolConfig::new())
+    }
+
+    #[test]
+    fn dtt_web_search_included_for_gpt_4_1_if_in_base() {
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs: Vec<InputItem> = vec![];
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, None, DEFAULT_OPENAI_MODEL_ID);
+        assert_eq!(determined_tools.len(), 2);
+        assert!(determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn dtt_web_search_excluded_for_o4_mini_even_if_in_base() {
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs: Vec<InputItem> = vec![];
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, None, TEST_O4_MINI_MODEL_ID);
+        assert_eq!(
+            determined_tools.len(),
+            1,
+            "websearch should be removed for o4-mini"
+        );
+        assert!(!determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn dtt_web_search_excluded_for_o3_even_if_in_base() {
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs: Vec<InputItem> = vec![];
+        let determined_tools = determine_turn_tools(&inputs, &base_tools, None, TEST_O3_MODEL_ID);
+        assert_eq!(
+            determined_tools.len(),
+            1,
+            "websearch should be removed for o3"
+        );
+        assert!(!determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn dtt_web_search_excluded_for_other_model_even_if_in_base() {
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs: Vec<InputItem> = vec![];
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, None, "some-other-model-id");
+        assert_eq!(
+            determined_tools.len(),
+            1,
+            "websearch should be removed for other models"
+        );
+        assert!(!determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) => f.name == "base_tool",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn dtt_web_search_not_present_in_base_tools_gpt_4_1() {
+        let base_tools = vec![dummy_tool("base_tool")]; // websearch not in base
+        let inputs: Vec<InputItem> = vec![];
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, None, DEFAULT_OPENAI_MODEL_ID);
+        assert_eq!(determined_tools.len(), 1);
+        assert!(!determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+    }
+
+    #[test]
+    fn dtt_web_search_with_admin_tool_gpt_4_1() {
+        let admin_secret = "web_admin_secret";
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: format!("admin code {} do something", admin_secret),
+        })];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools = determine_turn_tools(
+            &inputs,
+            &base_tools,
+            bot_admin_code,
+            DEFAULT_OPENAI_MODEL_ID,
+        );
+        assert_eq!(
+            determined_tools.len(),
+            3,
+            "should have base_tool, websearch, and admin_tool"
+        );
+        assert!(determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) =>
+                f.name == tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn dtt_web_search_with_admin_tool_o4_mini() {
+        let admin_secret = "web_admin_secret_mini";
+        let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
+        let inputs = vec![InputItem::Message(InputMessageObject {
+            role: "user".to_string(),
+            content: format!("admin code {} do something", admin_secret),
+        })];
+        let bot_admin_code = Some(admin_secret);
+
+        let determined_tools =
+            determine_turn_tools(&inputs, &base_tools, bot_admin_code, TEST_O4_MINI_MODEL_ID);
+        assert_eq!(
+            determined_tools.len(),
+            2,
+            "should have base_tool and admin_tool, but not websearch"
+        );
+        assert!(!determined_tools
+            .iter()
+            .any(|t| matches!(t, ApiToolType::WebSearch(_))));
+        assert!(determined_tools.iter().any(|t| match t {
+            ApiToolType::Function(f) =>
+                f.name == tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME,
             _ => false,
         }));
     }
