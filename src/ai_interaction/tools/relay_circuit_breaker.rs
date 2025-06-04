@@ -76,17 +76,17 @@ impl RelayCircuitBreaker {
     #[instrument(skip(self))]
     async fn set_state(&self, relative_path: &str, enabled: bool) -> Result<String> {
         let request_url = format!(
-            "{}/ultrasound/v1/admin/{relative_path}?token={}",
-            self.base_url, self.admin_token
+            "{}/ultrasound/v1/admin/{relative_path}?token={}&enable={}",
+            self.base_url, self.admin_token, enabled
         );
-        let request_body = json!({ "enabled": enabled });
+        // let request_body = json!({ "enabled": enabled });
 
-        info!(url = %request_url, body = %request_body, "sending circuit breaker state request");
+        info!(url = %request_url, "sending circuit breaker state request");
 
         match self
             .http_client
             .post(&request_url)
-            .json(&request_body)
+            // .json(&request_body)
             .send()
             .await
         {
@@ -230,14 +230,15 @@ mod tests {
             RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
 
         // Mockito path should be relative to server.url()
-        let mock_path =
-            format!("/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}");
+        let mock_path = format!(
+            "/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
+        );
         let mock_api = server
             .mock("post", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "adjustment circuit breaker enabled"}"#)
-            .match_body(Matcher::Json(json!({"enabled": true})))
+            // .match_body(Matcher::Json(json!({"enabled": true})))
             .create_async()
             .await;
 
@@ -266,14 +267,15 @@ mod tests {
         let circuit_breaker_client =
             RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
 
-        let mock_path =
-            format!("/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}");
+        let mock_path = format!(
+            "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
+        );
         let mock_api = server
             .mock("post", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "auction circuit breaker disabled"}"#)
-            .match_body(Matcher::Json(json!({"enabled": false})))
+            // .match_body(Matcher::Json(json!({"enabled": false})))
             .create_async()
             .await;
 
@@ -301,14 +303,15 @@ mod tests {
         let circuit_breaker_client =
             RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
 
-        let mock_path =
-            format!("/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}");
+        let mock_path = format!(
+            "/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
+        );
         let mock_api = server
             .mock("post", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "adjustment cb enabled"}"#)
-            .match_body(Matcher::Json(json!({"enabled": true})))
+            // .match_body(Matcher::Json(json!({"enabled": true})))
             .create_async()
             .await;
 
@@ -340,14 +343,15 @@ mod tests {
         let circuit_breaker_client =
             RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
 
-        let mock_path =
-            format!("/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}");
+        let mock_path = format!(
+            "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
+        );
         let mock_api = server
             .mock("post", Matcher::Exact(mock_path.clone()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"message": "auction cb disabled"}"#)
-            .match_body(Matcher::Json(json!({"enabled": false})))
+            // .match_body(Matcher::Json(json!({"enabled": false})))
             .create_async()
             .await;
 
@@ -398,8 +402,9 @@ mod tests {
         let circuit_breaker_client =
             RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
 
-        let mock_path =
-            format!("/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}");
+        let mock_path = format!(
+            "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
+        );
         let mock_api = server
             .mock("post", Matcher::Exact(mock_path.clone()))
             .with_status(500)
