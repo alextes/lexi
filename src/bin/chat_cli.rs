@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
     };
 
     info!(
-        "Calling ai_interaction::process_single_prompt_for_cli with prompt: '{}', logging_chat_id: {}",
+        "calling ai_interaction::process_single_prompt_for_cli with prompt: '{}', logging_chat_id: {}",
         cli.prompt,
         cli.logging_chat_id
     );
@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
     {
         Ok((final_text, response_id)) => {
             info!(
-                "AI processing complete. Response ID: {}. Final text:",
+                "ai processing complete. response id: {}. final text:",
                 response_id
             );
             println!("ai interaction successful.");

@@ -20,7 +20,7 @@ use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, instrument, warn};
 
 // add these imports
-use crate::ai_interaction::tools::conversation_admin;
+use crate::ai_interaction::tools;
 use crate::env::ENV_CONFIG;
 
 pub const DEFAULT_OPENAI_MODEL_ID: &str = "gpt-4.1";
@@ -35,12 +35,13 @@ pub struct OpenAiCallConfig {
 
 pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     let available_tools = vec![
-        super::tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
-        super::tools::db_schema::DATABASE_SCHEMA_TOOL.clone(),
-        super::tools::db_query::MEVDB_QUERY_TOOL.clone(),
-        super::tools::db_query::GLOBALDB_QUERY_TOOL.clone(),
-        super::tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
-        super::tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
+        tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone(),
+        tools::db_schema::DATABASE_SCHEMA_TOOL.clone(),
+        tools::db_query::MEVDB_QUERY_TOOL.clone(),
+        tools::db_query::GLOBALDB_QUERY_TOOL.clone(),
+        tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone(),
+        tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone(),
+        tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone(),
     ];
     let instructions = indoc! {"
         you are a helpful ai assistant named lexi.
@@ -312,26 +313,26 @@ fn determine_turn_tools(
             if last_user_message_content.contains(&admin_trigger_phrase) {
                 info!(
                     "admin phrase with correct code detected. \'{}\' will be added to available tools for this turn.",
-                    conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                    tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
                 );
                 if !turn_specific_available_tools
                     .iter()
-                    .any(|t| t.name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
+                    .any(|t| t.name == tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME)
                 {
                     turn_specific_available_tools
-                        .push(conversation_admin::CONVERSATION_ADMIN_TOOL.clone());
+                        .push(tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone());
                 }
             } else {
                 info!(
                     "admin code is configured, but trigger phrase not found or incorrect in user message. \'{}\' will not be added.",
-                    conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                    tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
                 );
             }
         }
     } else {
         info!(
             "no bot_admin_code is configured. \'{}\' will not be available.",
-            conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+            tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
         );
     }
     turn_specific_available_tools
