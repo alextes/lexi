@@ -13,9 +13,102 @@ pub use mevdb_query::MEVDB_TOOL_NAME;
 
 // original content from db_utils.rs starts here
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
-use sqlx::{types::BigDecimal, Column, Executor, Row, ValueRef};
+use sqlx::postgres::PgTypeKind;
+use sqlx::TypeInfo;
+use sqlx::{
+    postgres::{PgRow, PgTypeInfo, PgValueRef},
+    types::BigDecimal,
+    Column, Executor, Row, ValueRef,
+};
 use tracing::instrument;
 use tracing::{error, info};
+
+// helper function for parsing enum values
+fn try_parse_enum_value_as_json(
+    raw_pg_value_ref: &PgValueRef, // from row.try_get_raw(col_idx)
+    column_name: &str,
+    column_type_info_name: &str, // from column.type_info().name()
+    row_idx: usize,
+) -> Result<JsonValue, JsonValue> {
+    // ok is the parsed json value, err is the json error to return early
+    match raw_pg_value_ref.as_str() {
+        Ok(s_ref) => Ok(json!(s_ref)), // s_ref is &str
+        Err(e) => {
+            let err_msg = format!(
+                "failed to convert enum column '{}' (type: {}) to string using as_str(): {}. row: {}. application error.",
+                column_name, column_type_info_name, e, row_idx
+            );
+            error!(
+                column_name,
+                column_type_name = %column_type_info_name,
+                row_idx,
+                error = %e,
+                err_msg,
+                "enum as_str() conversion error"
+            );
+            Err(json!({
+                "status": "error",
+                "message": "failed to process database results due to an enum conversion issue (as_str failed).",
+                "details": err_msg
+            }))
+        }
+    }
+}
+
+// New helper function for converting a non-null SQL value to JsonValue
+fn try_convert_non_null_sql_value_to_json<'r>(
+    raw_pg_value_ref: &PgValueRef<'r>, // From row.try_get_raw(col_idx), used for ENUMs
+    row: &'r PgRow,                    // The current row, for other row.try_get calls
+    col_idx: usize,                    // Index for row.try_get
+    column_name: &str,
+    column_type_info: &PgTypeInfo, // Full type info for kind() and name()
+    row_idx: usize,                // For logging
+) -> Result<JsonValue, JsonValue> {
+    // Ok is the parsed json value, Err is the json error to return early
+    if matches!(column_type_info.kind(), PgTypeKind::Enum(_)) {
+        // Call the existing helper for ENUMs, passing the necessary parts
+        try_parse_enum_value_as_json(
+            raw_pg_value_ref,
+            column_name,
+            column_type_info.name(),
+            row_idx,
+        )
+    } else if let Ok(v_str) = row.try_get::<String, _>(col_idx) {
+        Ok(json!(v_str))
+    } else if let Ok(v_i64) = row.try_get::<i64, _>(col_idx) {
+        Ok(json!(v_i64))
+    } else if let Ok(v_i32) = row.try_get::<i32, _>(col_idx) {
+        Ok(json!(v_i32))
+    } else if let Ok(v_f64) = row.try_get::<f64, _>(col_idx) {
+        Ok(json!(v_f64))
+    } else if let Ok(v_dec) = row.try_get::<BigDecimal, _>(col_idx) {
+        Ok(json!(v_dec.to_string()))
+    } else if let Ok(v_bool) = row.try_get::<bool, _>(col_idx) {
+        Ok(json!(v_bool))
+    } else if let Ok(v_time) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_idx) {
+        Ok(json!(v_time.to_rfc3339()))
+    } else {
+        // This case is for non-null values that didn't match any of the above types
+        let err_msg = format!(
+            "unhandled or failed conversion for non-null sql type for column '{}' (type: {}) in row {}. this is an application error.",
+            column_name,
+            column_type_info.name(), // Use .name() for a cleaner type representation in the error
+            row_idx
+        );
+        error!(
+            column_name,
+            column_type_name = %column_type_info.name(),
+            row_idx,
+            err_msg,
+            "data conversion error"
+        );
+        Err(json!({
+            "status": "error",
+            "message": "failed to process database results due to an unsupported or unparseable data type.",
+            "details": err_msg
+        }))
+    }
+}
 
 // this function will be called by both mevdb_query and globaldb_query
 // it's now a public function within the db module.
@@ -45,49 +138,29 @@ where
                     let column_type_info = column.type_info();
 
                     match row.try_get_raw(col_idx) {
-                        Ok(raw_value) if raw_value.is_null() => {
-                            json_row.insert(column_name.to_string(), json!(null));
-                        }
-                        Ok(_non_null_raw_value) => {
-                            let value: JsonValue = if let Ok(v_str) =
-                                row.try_get::<String, _>(col_idx)
-                            {
-                                json!(v_str)
-                            } else if let Ok(v_i64) = row.try_get::<i64, _>(col_idx) {
-                                json!(v_i64)
-                            } else if let Ok(v_i32) = row.try_get::<i32, _>(col_idx) {
-                                json!(v_i32)
-                            } else if let Ok(v_f64) = row.try_get::<f64, _>(col_idx) {
-                                json!(v_f64)
-                            } else if let Ok(v_dec) = row.try_get::<BigDecimal, _>(col_idx) {
-                                json!(v_dec.to_string())
-                            } else if let Ok(v_bool) = row.try_get::<bool, _>(col_idx) {
-                                json!(v_bool)
-                            } else if let Ok(v_time) =
-                                row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_idx)
-                            {
-                                json!(v_time.to_rfc3339())
+                        Ok(raw_pg_value_ref) => {
+                            if raw_pg_value_ref.is_null() {
+                                json_row.insert(column_name.to_string(), json!(null));
                             } else {
-                                let err_msg = format!(
-                                        "unhandled or failed conversion for non-null sql type for column '{}' (type: {:?}) in row {}. this is an application error.",
-                                        column_name,
-                                        column_type_info,
-                                        row_idx
-                                    );
-                                error!(
+                                // raw_pg_value_ref is not null here.
+                                // Pass row as is (it's &'r PgRow from the outer loop iterator)
+                                // Pass column_type_info as is (it's &'PgTypeInfo from column.type_info())
+                                match try_convert_non_null_sql_value_to_json(
+                                    &raw_pg_value_ref,
+                                    row,
+                                    col_idx,
                                     column_name,
-                                    column_type_name = %column_type_info,
+                                    column_type_info,
                                     row_idx,
-                                    err_msg,
-                                    "data conversion error"
-                                );
-                                return json!({
-                                    "status": "error",
-                                    "message": "failed to process database results due to an unsupported or unparseable data type.",
-                                    "details": err_msg
-                                });
-                            };
-                            json_row.insert(column_name.to_string(), value);
+                                ) {
+                                    Ok(parsed_json_value) => {
+                                        json_row.insert(column_name.to_string(), parsed_json_value);
+                                    }
+                                    Err(error_json_to_return) => {
+                                        return error_json_to_return;
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             let err_msg = format!(
@@ -126,6 +199,7 @@ mod tests {
     use super::execute_db_query_common;
     use anyhow::Result;
     use chrono::{DateTime, Utc};
+    use serde_json::json;
     use serde_json::Value as JsonValue;
     use sqlx::{types::BigDecimal, PgPool};
     use std::str::FromStr;
@@ -326,6 +400,90 @@ mod tests {
         sqlx::query("DROP TABLE test_all_types;")
             .execute(&pool)
             .await?;
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_execute_db_query_common_with_enum(pool: PgPool) -> Result<()> {
+        // 1. create custom enum type
+        sqlx::query("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');")
+            .execute(&pool)
+            .await?;
+
+        // 2. create table with enum column
+        let create_table_query = "
+            CREATE TABLE test_enum_table (
+                id SERIAL PRIMARY KEY,
+                current_mood mood,
+                description TEXT
+            );";
+        sqlx::query(create_table_query).execute(&pool).await?;
+
+        // 3. insert data
+        sqlx::query(
+            "INSERT INTO test_enum_table (current_mood, description) VALUES
+                ('happy', 'feeling great'),
+                ('sad', 'not so good'),
+                (NULL, 'unknown mood'),
+                ('ok', NULL);",
+        )
+        .execute(&pool)
+        .await?;
+
+        // 4. select data
+        let select_data_query =
+            "SELECT id, current_mood, description FROM test_enum_table ORDER BY id;";
+        let result_json_value =
+            execute_db_query_common(&pool, select_data_query, "test_enum").await;
+
+        // 5. verify results
+        let arr = result_json_value.as_array().ok_or_else(|| {
+            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
+        })?;
+        assert_eq!(
+            arr.len(),
+            4,
+            "expected 4 rows, got {}. result: \n{:#?}",
+            arr.len(),
+            result_json_value
+        );
+
+        // row 0: happy
+        let row0 = arr[0].as_object().unwrap();
+        assert_eq!(
+            row0.get("current_mood").unwrap(),
+            &json!("happy"),
+            "row 0 mood mismatch. got: {:?}",
+            row0.get("current_mood")
+        );
+
+        // row 1: sad
+        let row1 = arr[1].as_object().unwrap();
+        assert_eq!(
+            row1.get("current_mood").unwrap(),
+            &json!("sad"),
+            "row 1 mood mismatch. got: {:?}",
+            row1.get("current_mood")
+        );
+
+        // row 2: NULL
+        let row2 = arr[2].as_object().unwrap();
+        assert!(
+            row2.get("current_mood").unwrap().is_null(),
+            "row 2 mood expected null. got: {:?}",
+            row2.get("current_mood")
+        );
+
+        // row 3: ok
+        let row3 = arr[3].as_object().unwrap();
+        assert_eq!(
+            row3.get("current_mood").unwrap(),
+            &json!("ok"),
+            "row 3 mood mismatch. got: {:?}",
+            row3.get("current_mood")
+        );
+
+        // 6. cleanup - not needed, sqlx::test handles rollback
         Ok(())
     }
 }
