@@ -292,7 +292,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
                 let mp_ctx = ai_interaction::HandlerContext {
                     db: ctx.db.clone(),
-                    http_client: &ctx.http_client,
+                    http_client: ctx.http_client.clone(),
                     bot_db_id: ctx.bot_db_id,
                     openai_api_key: ctx.openai_api_key,
                     beacon_node: BeaconNodeHttp::new(beacon_url_for_handler),
@@ -329,7 +329,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     if let Some(msg_content) =
                                         json_val.get("message").and_then(|v| v.as_str())
                                     {
-                                        format!("system message: {}", msg_content)
+                                        format!("system message: {msg_content}")
                                     } else {
                                         warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "resetconversation json did not contain a 'message' field. sending raw json.");
                                         confirmation_json_str.to_string()
@@ -369,7 +369,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     if let Some(msg_content) =
                                         json_val.get("message").and_then(|v| v.as_str())
                                     {
-                                        format!("system message: {}", msg_content)
+                                        format!("system message: {msg_content}")
                                     } else {
                                         warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "changemodel json did not contain a 'message' field. sending raw json.");
                                         confirmation_json_str.to_string()
@@ -432,7 +432,7 @@ mod tests {
     // tests for mentions_bot
     #[test]
     fn test_mentions_bot_true_when_mentioned() {
-        let text = Some(format!("hello {} how are you", BOT_USERNAME));
+        let text = Some(format!("hello {BOT_USERNAME} how are you"));
         let entities = Some(vec![MessageEntity {
             entity_type: "mention".to_string(),
             offset: 6, // Start of "@lexi_alex_bot"
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_mentions_bot_false_with_text_no_entities() {
-        let text = Some(format!("hello {}", BOT_USERNAME));
+        let text = Some(format!("hello {BOT_USERNAME}"));
         let entities: Option<Vec<MessageEntity>> = None;
         assert!(!mentions_bot(&text, &entities));
     }
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_mentions_bot_false_with_empty_entities_list() {
-        let text = Some(format!("hello {}", BOT_USERNAME));
+        let text = Some(format!("hello {BOT_USERNAME}"));
         let entities = Some(Vec::new());
         assert!(!mentions_bot(&text, &entities));
     }
@@ -521,7 +521,7 @@ mod tests {
     // tests for extract_prompt_from_mention
     #[test]
     fn test_extract_prompt_mention_at_start() {
-        let text = format!("{} what is the weather?", BOT_USERNAME);
+        let text = format!("{BOT_USERNAME} what is the weather?");
         let entities = Some(vec![MessageEntity {
             entity_type: "mention".to_string(),
             offset: 0,
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn test_extract_prompt_mention_in_middle() {
-        let text = format!("hey {} tell me a joke", BOT_USERNAME);
+        let text = format!("hey {BOT_USERNAME} tell me a joke");
         let entities = Some(vec![MessageEntity {
             entity_type: "mention".to_string(),
             offset: 4, // After "hey "
@@ -555,7 +555,7 @@ mod tests {
     fn test_extract_prompt_mention_at_end() {
         let text_prefix = "summarize this for me ";
         let bot_mention_segment = BOT_USERNAME;
-        let text = format!("{}{}", text_prefix, bot_mention_segment);
+        let text = format!("{text_prefix}{bot_mention_segment}");
 
         let entities = Some(vec![MessageEntity {
             entity_type: "mention".to_string(),
@@ -590,10 +590,7 @@ mod tests {
                     entity.offset, entity.length
                 );
                 let end_slice = entity.offset + entity.length;
-                println!(
-                    "test_extract_prompt_mention_at_end: calculated slice end = {}",
-                    end_slice
-                );
+                println!("test_extract_prompt_mention_at_end: calculated slice end = {end_slice}");
             }
         }
 
@@ -612,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_extract_prompt_mention_text_no_entities() {
-        let text = format!("{} what if entities are missing?", BOT_USERNAME);
+        let text = format!("{BOT_USERNAME} what if entities are missing?");
         let entities: Option<Vec<MessageEntity>> = None;
         // Should return original text if entities are None, even if text contains mention string
         assert_eq!(extract_prompt_from_mention(&text, &entities), text);
@@ -666,7 +663,7 @@ mod tests {
 
     #[test]
     fn test_extract_prompt_mention_with_leading_trailing_spaces_in_text() {
-        let text = format!("  {}  what now?  ", BOT_USERNAME);
+        let text = format!("  {BOT_USERNAME}  what now?  ");
         let entities = Some(vec![MessageEntity {
             entity_type: "mention".to_string(),
             offset: 2, // after leading spaces

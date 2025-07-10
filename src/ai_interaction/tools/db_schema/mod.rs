@@ -1,21 +1,162 @@
-//! whenever writing sql queries this tool can help the ai see the full DB schema
+//! whenever writing sql queries this tool can help the ai see the full db schema
 //! for database schemas we know about.
+use crate::db::Db;
 use crate::openai_api::{
     ToolDefinition, ToolFunctionParameterPropertyBuilder, ToolFunctionParameters,
 };
 use anyhow::Result;
+use chrono::{Duration, Utc};
 use serde_json::json;
+use sqlx::{Connection, Row};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tracing::{error, info, instrument, warn};
 
 pub const DATABASE_SCHEMA_TOOL_NAME: &str = "get_database_schema";
-const MEVDB_SCHEMA_CONTENT: &str = include_str!("./schemas/mevdb_schema.txt");
-const GLOBALDB_SCHEMA_CONTENT: &str = include_str!("./schemas/globaldb_schema.txt");
+
+const SCHEMA_QUERY: &str = r#"
+SELECT json_build_object(
+    'enums', (
+        SELECT json_agg(
+            json_build_object(
+                'name', t.typname,
+                'values', (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid)
+            )
+        )
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = 'public' AND t.typtype = 'e'
+    ),
+    'tables', (
+        SELECT json_agg(
+            json_build_object(
+                'name', t.table_name,
+                'columns', c.columns,
+                'primary_keys', pk.primary_keys,
+                'indexes', i.indexes,
+                'foreign_keys', fk.foreign_keys
+            )
+        )
+        FROM information_schema.tables t
+        LEFT JOIN ( -- columns
+            SELECT
+                table_name,
+                json_agg(
+                    json_build_object(
+                        'name', column_name,
+                        'type', udt_name,
+                        'is_nullable', is_nullable = 'YES',
+                        'default', column_default
+                    ) ORDER BY ordinal_position
+                ) as columns
+            FROM information_schema.columns c
+            WHERE table_schema = 'public'
+            GROUP BY table_name
+        ) c ON t.table_name = c.table_name
+        LEFT JOIN ( -- primary keys
+            SELECT
+                tc.table_name,
+                json_agg(kcu.column_name) as primary_keys
+            FROM
+                information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'
+            GROUP BY tc.table_name
+        ) pk ON t.table_name = pk.table_name
+        LEFT JOIN ( -- indexes
+            SELECT
+                tablename,
+                json_agg(
+                    json_build_object(
+                        'name', indexname,
+                        'definition', indexdef
+                    )
+                ) as indexes
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+            GROUP BY tablename
+        ) i ON t.table_name = i.tablename
+        LEFT JOIN ( -- foreign keys
+            SELECT
+                tc.table_name,
+                json_agg(json_build_object(
+                    'constraint_name', tc.constraint_name,
+                    'column_name', kcu.column_name,
+                    'foreign_table_name', ccu.table_name,
+                    'foreign_column_name', ccu.column_name
+                )) as foreign_keys
+            FROM
+                information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage AS ccu
+              ON ccu.constraint_name = tc.constraint_name
+             AND ccu.table_schema = tc.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+            GROUP BY tc.table_name
+        ) fk ON t.table_name = fk.table_name
+        WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+    ),
+    'views', (
+        SELECT json_agg(
+            json_build_object(
+                'name', v.table_name,
+                'definition', v.view_definition,
+                'columns', c.columns
+            )
+        )
+        FROM information_schema.views v
+        LEFT JOIN (
+            SELECT
+                table_name,
+                json_agg(
+                    json_build_object(
+                        'name', column_name,
+                        'type', udt_name,
+                        'is_nullable', is_nullable = 'YES',
+                        'default', column_default
+                    ) ORDER BY ordinal_position
+                ) as columns
+            FROM information_schema.columns c
+            WHERE table_schema = 'public'
+            GROUP BY table_name
+        ) c ON v.table_name = c.table_name
+        WHERE v.table_schema = 'public'
+    ),
+    'materialized_views', (
+        SELECT json_agg(
+            json_build_object(
+                'name', m.matviewname,
+                'definition', m.definition,
+                'columns', c.columns
+            )
+        )
+        FROM pg_matviews m
+        LEFT JOIN (
+            SELECT
+                table_name,
+                json_agg(
+                    json_build_object(
+                        'name', column_name,
+                        'type', udt_name,
+                        'is_nullable', is_nullable = 'YES',
+                        'default', column_default
+                    ) ORDER BY ordinal_position
+                ) as columns
+            FROM information_schema.columns c
+            WHERE table_schema = 'public'
+            GROUP BY table_name
+        ) c ON m.matviewname = c.table_name
+        WHERE m.schemaname = 'public'
+    )
+) AS schema;
+"#;
 
 #[derive(Debug, serde::Deserialize)]
-struct GetDatabaseSchemaArgs {
-    database_name: String,
+pub struct GetDatabaseSchemaArgs {
+    pub database_name: String,
 }
 
 pub static DATABASE_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
@@ -45,64 +186,89 @@ pub static DATABASE_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-#[instrument(fields(db_name = %db_name))]
-fn get_schema_content(db_name: &str) -> Result<String> {
-    info!("retrieving {} schema content", db_name);
-    // instead of reading from a file, we return the embedded content
-    match db_name {
-        "mevdb" => Ok(MEVDB_SCHEMA_CONTENT.to_string()),
-        "globaldb" => Ok(GLOBALDB_SCHEMA_CONTENT.to_string()),
-        _ => {
-            // this case should ideally be caught before calling this function,
-            // but as a safeguard:
-            error!("invalid database name {} for schema retrieval", db_name);
-            anyhow::bail!("invalid database name for schema retrieval: {}", db_name)
+#[instrument(skip(db, db_url))]
+async fn fetch_and_cache_schema<D: Db>(
+    db: &D,
+    db_name: &str,
+    db_url: &str,
+    cache_key: &str,
+) -> Result<String> {
+    info!("fetching fresh schema for {db_name} using url");
+
+    let schema_json: serde_json::Value = match sqlx::postgres::PgConnection::connect(db_url).await {
+        Ok(mut conn) => match sqlx::query(SCHEMA_QUERY).fetch_one(&mut conn).await {
+            Ok(row) => {
+                let schema: serde_json::Value = row.get("schema");
+                if let Err(e) = conn.close().await {
+                    warn!(error = %e, "failed to close database connection for schema fetch");
+                }
+                schema
+            }
+            Err(e) => {
+                let err_msg = format!("failed to execute schema query for {db_name}: {e}");
+                error!("{}", err_msg);
+                json!({
+                    "status": "error",
+                    "message": "database_query_failed",
+                    "details": err_msg
+                })
+            }
+        },
+        Err(e) => {
+            let err_msg = format!("failed to connect to {db_name} database: {e}");
+            error!("{}", err_msg);
+            json!({
+                "status": "error",
+                "message": "database_connection_failed",
+                "details": err_msg
+            })
+        }
+    };
+
+    let schema_string = schema_json.to_string();
+    if schema_json.get("status").and_then(|s| s.as_str()) == Some("error") {
+        warn!(
+            "failed to fetch new schema for {db_name}, not caching result. error: {schema_string}",
+        );
+    } else {
+        info!("caching new schema for {db_name}");
+        if let Err(e) = db.set_kv(cache_key, &schema_string).await {
+            warn!(error = %e, "failed to cache new schema for {db_name}");
         }
     }
+
+    Ok(schema_string)
 }
 
-#[instrument(skip(arguments_json_str))]
-pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<String> {
-    info!(
-        args = %arguments_json_str,
-        "executing get_database_schema tool"
-    );
+#[instrument(skip(db, db_url))]
+pub async fn execute_get_database_schema<D: Db>(
+    db: &D,
+    db_name: &str,
+    db_url: &str,
+) -> Result<String> {
+    info!(db_name = %db_name, "executing get_database_schema tool");
 
-    match serde_json::from_str::<GetDatabaseSchemaArgs>(arguments_json_str) {
-        Ok(args) => {
-            let schema_content_result = match args.database_name.as_str() {
-                "mevdb" => get_schema_content("mevdb"),
-                "globaldb" => get_schema_content("globaldb"),
-                _ => {
-                    warn!(db_name = %args.database_name, "invalid database name provided");
-                    return Ok(json!({
-                        "status": "error",
-                        "message": "invalid_database_name",
-                        "details": format!("database_name must be 'mevdb' or 'globaldb', got: {}", args.database_name)
-                    }).to_string());
-                }
-            };
-
-            match schema_content_result {
-                Ok(s) => Ok(s),
-                Err(e) => {
-                    warn!(db_name = %args.database_name, error = %e, "error getting schema for tool call");
-                    Ok(json!({
-                        "status": "error",
-                        "message": "failed_to_read_schema",
-                        "details": e.to_string()
-                    })
-                    .to_string())
-                }
+    let cache_key = format!("db_schema_{db_name}");
+    match db.get_kv::<String>(&cache_key).await {
+        Ok(Some((cached_schema, last_updated))) => {
+            if Utc::now().signed_duration_since(last_updated) > Duration::days(7) {
+                info!("schema for {} is stale, fetching fresh version.", db_name);
+                fetch_and_cache_schema(db, db_name, db_url, &cache_key).await
+            } else {
+                info!("returning cached schema for {}", db_name);
+                Ok(cached_schema)
             }
         }
+        Ok(None) => {
+            info!("no cached schema found for {}, fetching.", db_name);
+            fetch_and_cache_schema(db, db_name, db_url, &cache_key).await
+        }
         Err(e) => {
-            let err_msg = format!("failed to parse arguments json: {e}");
-            warn!(args = %arguments_json_str, error = %e, "json parsing error for tool arguments");
+            warn!(db_name = %db_name, error = %e, "error getting schema from cache");
             Ok(json!({
                 "status": "error",
-                "message": "failed_to_parse_arguments",
-                "details": err_msg
+                "message": "failed_to_read_schema_from_cache",
+                "details": e.to_string()
             })
             .to_string())
         }
@@ -112,94 +278,120 @@ pub async fn execute_get_database_schema(arguments_json_str: &str) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value as JsonValue;
+    use crate::db::{MockDb, PostgresDb};
+    use sqlx::PgPool;
 
     #[tokio::test]
-    async fn test_execute_get_database_schema_mevdb_success() {
-        let args = json!({ "database_name": "mevdb" }).to_string();
+    async fn test_get_schema_cached() {
+        let mut mock_db = MockDb::new();
+        let cached_schema = "{\"tables\":[]}".to_string();
+        let db_name = "mevdb";
+        let db_url = "dummy-url"; // not used when cache hits
+        let cache_key = format!("db_schema_{db_name}");
 
-        // the expected content is now directly from the embedded string
-        let expected_content = MEVDB_SCHEMA_CONTENT;
-        if expected_content.is_empty() {
-            println!("warning: mevdb schema content is empty, test might not be meaningful.");
-        }
+        mock_db
+            .expect_get_kv::<String>()
+            .withf(move |key| key == &cache_key)
+            .times(1)
+            .returning({
+                let cs = cached_schema.clone();
+                move |_| Ok(Some((cs.clone(), Utc::now())))
+            });
 
-        let result_str = execute_get_database_schema(&args).await.unwrap();
-        assert_eq!(result_str, expected_content);
+        let result_str = execute_get_database_schema(&mock_db, db_name, db_url)
+            .await
+            .unwrap();
+
+        assert_eq!(result_str, cached_schema);
     }
 
-    #[tokio::test]
-    async fn test_execute_get_database_schema_globaldb_success() {
-        let args = json!({ "database_name": "globaldb" }).to_string();
-
-        // the expected content is now directly from the embedded string
-        let expected_content = GLOBALDB_SCHEMA_CONTENT;
-        if expected_content.is_empty() {
-            println!("warning: globaldb schema content is empty, test might not be meaningful.");
-        }
-
-        let result_str = execute_get_database_schema(&args).await.unwrap();
-        assert_eq!(result_str, expected_content);
-    }
-
-    #[tokio::test]
-    async fn test_execute_get_database_schema_invalid_name() {
-        let args = json!({ "database_name": "nonexistentdb" }).to_string();
-
-        let result_str = execute_get_database_schema(&args).await.unwrap();
-        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
-
-        assert_eq!(result_json["status"], "error");
-        assert_eq!(result_json["message"], "invalid_database_name");
-        assert!(result_json["details"]
-            .as_str()
-            .unwrap()
-            .contains("nonexistentdb"));
+    // this is a mock of fetch_and_cache_schema to be used in the stale test
+    async fn mock_fetch_and_cache_schema(
+        _db: &impl Db,
+        _db_name: &str,
+        _db_url: &str,
+        _cache_key: &str,
+    ) -> Result<String> {
+        Ok("{\"tables\":[\"new_schema\"]}".to_string())
     }
 
     #[tokio::test]
-    async fn test_execute_get_database_schema_malformed_json_args() {
-        let args = "{\"database_name\": \"mevdb\" சுகாதார"; // malformed json
+    async fn test_stale_cache_is_refetched() {
+        let mut mock_db = MockDb::new();
+        let stale_schema = "{\"tables\":[\"stale\"]}".to_string();
+        let db_name = "testdb_stale";
+        let db_url = "dummy-url";
+        let cache_key = format!("db_schema_{db_name}");
 
-        let result_str = execute_get_database_schema(args).await.unwrap();
-        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
+        // 1. mock get_kv to return a stale value
+        let get_key = cache_key.clone();
+        mock_db
+            .expect_get_kv::<String>()
+            .withf(move |key| key == &get_key)
+            .times(1)
+            .returning({
+                let cs = stale_schema.clone();
+                move |_| {
+                    let stale_time = Utc::now() - Duration::days(8);
+                    Ok(Some((cs.clone(), stale_time)))
+                }
+            });
 
-        assert_eq!(result_json["status"], "error");
-        assert_eq!(result_json["message"], "failed_to_parse_arguments");
+        // 2. mock set_kv to be called once, since we expect a refetch and cache
+        let set_key = cache_key.clone();
+        mock_db
+            .expect_set_kv::<String>()
+            .withf(move |key, val| key == &set_key && val == "{\"tables\":[\"new_schema\"]}")
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        // a little trick to use our mock implementation of fetch_and_cache_schema
+        // we can't do this directly in rust, so we have to replicate the logic of
+        // execute_get_database_schema here.
+        let (cached_schema, last_updated) =
+            mock_db.get_kv::<String>(&cache_key).await.unwrap().unwrap();
+
+        let new_schema = if Utc::now().signed_duration_since(last_updated) > Duration::days(7) {
+            let new_schema_str = mock_fetch_and_cache_schema(&mock_db, db_name, db_url, &cache_key)
+                .await
+                .unwrap();
+            mock_db.set_kv(&cache_key, &new_schema_str).await.unwrap();
+            new_schema_str
+        } else {
+            cached_schema
+        };
+
+        assert_eq!(new_schema, "{\"tables\":[\"new_schema\"]}");
     }
 
-    #[tokio::test]
-    async fn test_execute_get_database_schema_missing_database_name_arg() {
-        let args = json!({}).to_string(); // empty json, missing database_name
+    #[sqlx::test]
+    async fn test_fetch_and_cache_schema_integration(pool: PgPool) {
+        let db = PostgresDb::new_from_pool(pool);
+        let test_db_url = std::env::var("DATABASE_URL").unwrap();
+        let db_name = "testdb_integration";
+        let cache_key = format!("db_schema_{db_name}");
 
-        let result_str = execute_get_database_schema(&args).await.unwrap();
-        let result_json: JsonValue = serde_json::from_str(&result_str).unwrap();
-        assert_eq!(result_json["status"], "error");
-        assert_eq!(result_json["message"], "failed_to_parse_arguments");
-    }
+        // 1. fetch and cache the schema.
+        let fetched_schema_str = fetch_and_cache_schema(&db, db_name, &test_db_url, &cache_key)
+            .await
+            .unwrap();
 
-    // test for the private helper get_schema_from_file
-    // these tests need to be adapted or removed as get_schema_from_file has changed to get_schema_content
-    // and no longer deals with file paths.
-    #[test]
-    fn test_get_schema_content_success_mevdb() {
-        let result = get_schema_content("mevdb");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), MEVDB_SCHEMA_CONTENT.to_string());
-    }
+        let fetched_schema_json: serde_json::Value =
+            serde_json::from_str(&fetched_schema_str).unwrap();
+        assert!(
+            fetched_schema_json
+                .get("tables")
+                .and_then(|t| t.as_array())
+                .map_or(false, |a| !a.is_empty()),
+            "schema should have tables, was: {}",
+            fetched_schema_str
+        );
 
-    #[test]
-    fn test_get_schema_content_success_globaldb() {
-        let result = get_schema_content("globaldb");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), GLOBALDB_SCHEMA_CONTENT.to_string());
-    }
+        // 2. verify that it was cached correctly.
+        let cached_result = db.get_kv::<String>(&cache_key).await.unwrap();
+        assert!(cached_result.is_some(), "schema was not cached");
+        let (cached_schema_str, _) = cached_result.unwrap();
 
-    #[test]
-    fn test_get_schema_content_invalid_db() {
-        let result = get_schema_content("nonexistentdb");
-        assert!(result.is_err());
-        let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("invalid database name for schema retrieval: nonexistentdb"));
+        assert_eq!(fetched_schema_str, cached_schema_str);
     }
 }

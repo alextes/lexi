@@ -120,6 +120,17 @@ impl RelayCircuitBreaker {
     }
 }
 
+#[cfg(test)]
+impl Default for RelayCircuitBreaker {
+    fn default() -> Self {
+        Self {
+            http_client: ReqwestClient::new(),
+            admin_token: "test_token".to_string(),
+            base_url: "http://localhost:8080".to_string(),
+        }
+    }
+}
+
 struct ParsedArgs {
     command: String,
     enabled: bool,

@@ -16,7 +16,7 @@ use serde_json::{json, Map as JsonMap, Value as JsonValue};
 use sqlx::postgres::PgTypeKind;
 use sqlx::TypeInfo;
 use sqlx::{
-    postgres::{PgRow, PgTypeInfo, PgValueRef},
+    postgres::{PgRow, PgValueRef},
     types::BigDecimal,
     Column, Executor, Row, ValueRef,
 };
@@ -35,8 +35,7 @@ fn try_parse_enum_value_as_json(
         Ok(s_ref) => Ok(json!(s_ref)), // s_ref is &str
         Err(e) => {
             let err_msg = format!(
-                "failed to convert enum column '{}' (type: {}) to string using as_str(): {}. row: {}. application error.",
-                column_name, column_type_info_name, e, row_idx
+                "failed to convert enum column '{column_name}' (type: {column_type_info_name}) to string using as_str(): {e}. row: {row_idx}. application error."
             );
             error!(
                 column_name,
@@ -55,24 +54,46 @@ fn try_parse_enum_value_as_json(
     }
 }
 
-// New helper function for converting a non-null SQL value to JsonValue
-fn try_convert_non_null_sql_value_to_json<'r>(
-    raw_pg_value_ref: &PgValueRef<'r>, // From row.try_get_raw(col_idx), used for ENUMs
-    row: &'r PgRow,                    // The current row, for other row.try_get calls
-    col_idx: usize,                    // Index for row.try_get
-    column_name: &str,
-    column_type_info: &PgTypeInfo, // Full type info for kind() and name()
-    row_idx: usize,                // For logging
+/// handles different database column types and converts them to a jsonvalue.
+fn convert_db_value_to_json(
+    row: &PgRow,
+    col_idx: usize,
+    column: &sqlx::postgres::PgColumn,
+    row_idx: usize,
 ) -> Result<JsonValue, JsonValue> {
-    // Ok is the parsed json value, Err is the json error to return early
-    if matches!(column_type_info.kind(), PgTypeKind::Enum(_)) {
-        // Call the existing helper for ENUMs, passing the necessary parts
-        try_parse_enum_value_as_json(
-            raw_pg_value_ref,
+    let column_name = column.name();
+    let column_type_info = column.type_info();
+    let raw_pg_value_ref = match row.try_get_raw(col_idx) {
+        Ok(raw_val) => raw_val,
+        Err(e) => {
+            let err_msg = format!(
+                "failed to retrieve raw value for column '{column_name}' (type: {column_type_info:?}) in row {row_idx}: {e}. this might indicate a problem with the query or db connection."
+            );
+            error!(column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "raw data retrieval error");
+            return Err(json!({
+                "status": "error",
+                "message": "failed to retrieve data from database for a column.",
+                "details": err_msg
+            }));
+        }
+    };
+
+    if raw_pg_value_ref.is_null() {
+        return Ok(JsonValue::Null);
+    }
+
+    if let PgTypeKind::Enum(_) = column_type_info.kind() {
+        return try_parse_enum_value_as_json(
+            &raw_pg_value_ref,
             column_name,
             column_type_info.name(),
             row_idx,
-        )
+        );
+    }
+
+    // handle json/jsonb first, as it can be tricky for other types to handle
+    if let Ok(v_json) = row.try_get::<JsonValue, _>(col_idx) {
+        Ok(v_json)
     } else if let Ok(v_str) = row.try_get::<String, _>(col_idx) {
         Ok(json!(v_str))
     } else if let Ok(v_i64) = row.try_get::<i64, _>(col_idx) {
@@ -134,48 +155,13 @@ where
             for (row_idx, row) in rows.iter().enumerate() {
                 let mut json_row = JsonMap::new();
                 for (col_idx, column) in row.columns().iter().enumerate() {
-                    let column_name = column.name();
-                    let column_type_info = column.type_info();
-
-                    match row.try_get_raw(col_idx) {
-                        Ok(raw_pg_value_ref) => {
-                            if raw_pg_value_ref.is_null() {
-                                json_row.insert(column_name.to_string(), json!(null));
-                            } else {
-                                // raw_pg_value_ref is not null here.
-                                // Pass row as is (it's &'r PgRow from the outer loop iterator)
-                                // Pass column_type_info as is (it's &'PgTypeInfo from column.type_info())
-                                match try_convert_non_null_sql_value_to_json(
-                                    &raw_pg_value_ref,
-                                    row,
-                                    col_idx,
-                                    column_name,
-                                    column_type_info,
-                                    row_idx,
-                                ) {
-                                    Ok(parsed_json_value) => {
-                                        json_row.insert(column_name.to_string(), parsed_json_value);
-                                    }
-                                    Err(error_json_to_return) => {
-                                        return error_json_to_return;
-                                    }
-                                }
-                            }
+                    let column_name = column.name().to_string();
+                    match convert_db_value_to_json(row, col_idx, column, row_idx) {
+                        Ok(json_value) => {
+                            json_row.insert(column_name, json_value);
                         }
-                        Err(e) => {
-                            let err_msg = format!(
-                                "failed to retrieve raw value for column '{}' (type: {:?}) in row {}: {}. this might indicate a problem with the query or db connection.",
-                                column_name,
-                                column_type_info,
-                                row_idx,
-                                e
-                            );
-                            error!(column_name, column_type_name = %column_type_info, row_idx, error = %e, err_msg, "raw data retrieval error");
-                            return json!({
-                                "status": "error",
-                                "message": "failed to retrieve data from database for a column.",
-                                "details": err_msg
-                            });
+                        Err(err_json) => {
+                            return err_json;
                         }
                     }
                 }

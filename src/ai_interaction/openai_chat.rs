@@ -9,14 +9,15 @@
 use super::{AiConversationOutcome, BeaconNode};
 use crate::{
     db::Db,
+    env::ENV_CONFIG,
     openai_api::{
         self, ApiToolType, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
         OpenAiApiResponse, OutputFunctionCall, OutputItem, WebSearchToolConfig,
     },
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use indoc::indoc;
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 use tracing::{debug, error, info, instrument, warn};
 
 // add these imports
@@ -111,7 +112,37 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
     if tool_name == beacon_slot_check::BEACON_SLOT_CHECK_TOOL_NAME {
         beacon_slot_check::execute_beacon_slot_check(&ctx.beacon_node, arguments).await
     } else if tool_name == db_schema::DATABASE_SCHEMA_TOOL_NAME {
-        db_schema::execute_get_database_schema(arguments).await
+        let args: db_schema::GetDatabaseSchemaArgs = serde_json::from_str(arguments)
+            .with_context(|| format!("failed to parse args for {tool_name}"))?;
+        let db_name = args.database_name;
+
+        let db_url = match db_name.as_str() {
+            "mevdb" => ENV_CONFIG.mevdb_database_url.as_deref(),
+            "globaldb" => ENV_CONFIG.globaldb_database_url.as_deref(),
+            _ => {
+                warn!(db_name = %db_name, "invalid database name provided for schema tool");
+                return Ok(json!({
+                    "status": "error",
+                    "message": "invalid_database_name",
+                    "details": format!("database_name must be 'mevdb' or 'globaldb', got: {db_name}")
+                }).to_string());
+            }
+        };
+
+        let db_url = if let Some(url) = db_url {
+            url
+        } else {
+            let err_msg = format!("database url for {db_name} not configured");
+            warn!("{err_msg}");
+            return Ok(json!({
+                "status": "error",
+                "message": "database_not_configured",
+                "details": err_msg
+            })
+            .to_string());
+        };
+
+        db_schema::execute_get_database_schema(&ctx.db, &db_name, db_url).await
     } else if tool_name == db_query::MEVDB_TOOL_NAME {
         db_query::execute_mevdb_query_tool(arguments).await
     } else if tool_name == db_query::GLOBALDB_TOOL_NAME {
@@ -129,8 +160,7 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
     } else {
         warn!("received unexpected tool name for execution");
         Ok(format!(
-            "{{\"error\": \"unexpected_tool_name\", \"tool_name\": \"{}\"}}",
-            tool_name
+            "{{\"error\": \"unexpected_tool_name\", \"tool_name\": \"{tool_name}\"}}"
         ))
     }
 }
@@ -254,7 +284,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
             first_iteration = false;
 
             match openai_api::call_responses_api(
-                ctx.http_client,
+                ctx.http_client.clone(),
                 ctx.openai_api_key,
                 conversation_history.clone(),
                 next_api_args,
@@ -306,7 +336,7 @@ pub(crate) fn determine_turn_tools(
     let mut turn_specific_available_tools = base_available_tools.to_vec();
 
     if let Some(expected_admin_code_val) = bot_admin_code {
-        let admin_trigger_phrase = format!("admin code {}", expected_admin_code_val);
+        let admin_trigger_phrase = format!("admin code {expected_admin_code_val}");
 
         if let Some(last_user_message_content) = initial_input_items.iter().rev().find_map(|item| {
             if let InputItem::Message(msg) = item {
@@ -598,7 +628,7 @@ mod tests {
             InputItem::Message(InputMessageObject {
                 // latest user message with code
                 role: "user".to_string(),
-                content: format!("special request: admin code {}", admin_secret),
+                content: format!("special request: admin code {admin_secret}"),
             }),
         ];
         let bot_admin_code = Some(admin_secret);
@@ -649,7 +679,7 @@ mod tests {
         let inputs = vec![
             InputItem::Message(InputMessageObject {
                 role: "user".to_string(),
-                content: format!("my admin code {} was for an old task", admin_secret), // Older user message with code
+                content: format!("my admin code {admin_secret} was for an old task"), // Older user message with code
             }),
             InputItem::Message(InputMessageObject {
                 role: "assistant".to_string(),
@@ -690,7 +720,7 @@ mod tests {
 
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
-            content: format!("give me admin access with admin code {}", admin_secret),
+            content: format!("give me admin access with admin code {admin_secret}"),
         })];
         let bot_admin_code = Some(admin_secret);
 
@@ -726,7 +756,7 @@ mod tests {
 
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
-            content: format!("admin code {} for action", admin_secret),
+            content: format!("admin code {admin_secret} for action"),
         })];
         let bot_admin_code = Some(admin_secret);
 
@@ -841,7 +871,7 @@ mod tests {
         let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
-            content: format!("admin code {} do something", admin_secret),
+            content: format!("admin code {admin_secret} do something"),
         })];
         let bot_admin_code = Some(admin_secret);
 
@@ -872,7 +902,7 @@ mod tests {
         let base_tools = vec![dummy_tool("base_tool"), web_search_tool()];
         let inputs = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
-            content: format!("admin code {} do something", admin_secret),
+            content: format!("admin code {admin_secret} do something"),
         })];
         let bot_admin_code = Some(admin_secret);
 

@@ -67,7 +67,7 @@ mod tests {
         mock.assert_async().await;
         match result {
             Ok(status_code) => assert_eq!(status_code, StatusCode::OK),
-            Err(e) => panic!("expected Ok(StatusCode::OK), got Err({:?})", e),
+            Err(e) => panic!("expected Ok(StatusCode::OK), got Err({e:?})"),
         }
     }
 
@@ -89,7 +89,7 @@ mod tests {
         mock.assert_async().await;
         match result {
             Ok(status_code) => assert_eq!(status_code, StatusCode::NOT_FOUND),
-            Err(e) => panic!("expected Ok(StatusCode::NOT_FOUND), got Err({:?})", e),
+            Err(e) => panic!("expected Ok(StatusCode::NOT_FOUND), got Err({e:?})"),
         }
     }
 
@@ -112,10 +112,7 @@ mod tests {
         mock.assert_async().await;
         match result {
             Ok(status_code) => assert_eq!(status_code, StatusCode::INTERNAL_SERVER_ERROR),
-            Err(e) => panic!(
-                "expected Ok(StatusCode::INTERNAL_SERVER_ERROR), got Err({:?})",
-                e
-            ),
+            Err(e) => panic!("expected Ok(StatusCode::INTERNAL_SERVER_ERROR), got Err({e:?})"),
         }
     }
 

@@ -8,7 +8,7 @@ pub use types::*;
 const OPENAI_RESPONSES_API_URL: &str = "https://api.openai.com/v1/responses";
 
 pub async fn call_responses_api<'a>(
-    http_client: &ReqwestClient,
+    http_client: ReqwestClient,
     api_key: &str,
     input_items: Vec<InputItem>,
     args: CallResponsesApiOptionalArgs<'a>,
@@ -135,7 +135,7 @@ mod tests {
         };
 
         println!("attempting test call to call_responses_api with 'input' parameter...");
-        let result = call_responses_api(&http_client, &api_key, input_items_val, api_args).await;
+        let result = call_responses_api(http_client, &api_key, input_items_val, api_args).await;
 
         match result {
             Ok(parsed_response) => {
@@ -231,7 +231,7 @@ mod tests {
 
         println!("function call test: step 1 - requesting tool use...");
         let initial_response_result = call_responses_api(
-            &http_client,
+            http_client.clone(),
             &api_key,
             input_items_initial_val.clone(),
             initial_api_args,
@@ -313,7 +313,7 @@ mod tests {
 
         println!("function call test: step 2 - sending function result...");
         let final_response_result = call_responses_api(
-            &http_client,
+            http_client.clone(),
             &api_key,
             second_call_input_items_val,
             final_api_args,

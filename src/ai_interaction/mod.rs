@@ -59,7 +59,7 @@ pub enum AiConversationOutcome {
 
 pub struct HandlerContext<'a, D: Db, B: BeaconNode> {
     pub db: D,
-    pub http_client: &'a ReqwestClient,
+    pub http_client: ReqwestClient,
     pub bot_db_id: i32, // kept as some tools/logging might still reference it via context
     pub openai_api_key: &'a str,
     pub beacon_node: B,
@@ -105,7 +105,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
     };
 
     match call_responses_api(
-        ctx.http_client,
+        ctx.http_client.clone(),
         ctx.openai_api_key,
         input_items.clone(),
         initial_api_args,
@@ -145,10 +145,7 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
                 // The user can be informed that a reset was requested.
                 info!(response_id = %response_id, "conversation reset was requested by ai/tool.");
                 Ok((
-                    format!(
-                        "conversation reset requested by ai/tool, message: \"{}\"",
-                        message
-                    ),
+                    format!("conversation reset requested by ai/tool, message: \"{message}\""),
                     response_id,
                 ))
             }
@@ -157,8 +154,7 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
                 info!(response_id = %response_id, %new_model_id, "openai model change requested by ai/tool.");
                 Ok((
                     format!(
-                        "openai model change to '{}' requested by ai/tool. confirmation: \"{}\"",
-                        new_model_id, message
+                        "openai model change to '{new_model_id}' requested by ai/tool. confirmation: \"{message}\""
                     ),
                     response_id, // return original response_id that triggered change
                 ))

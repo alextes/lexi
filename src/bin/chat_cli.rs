@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     // Create the simplified HandlerContext for ai_interaction
     let ai_interaction_handler_ctx = AiInteractionHandlerContext {
         db,
-        http_client: &http_client,
+        http_client: http_client.clone(),
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
         openai_api_key: &openai_api_key,
         beacon_node: BeaconNodeHttp::new(

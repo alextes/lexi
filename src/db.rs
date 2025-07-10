@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use mockall::automock;
+use serde::{de::DeserializeOwned, Serialize};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use std::str::FromStr;
 
+use crate::key_value_store::{KeyValueStore, PostgresKeyValueStore};
 use crate::telegram::types::{
     Chat as TelegramChat, Message as TelegramMessage, User as TelegramUser,
 };
@@ -32,11 +34,21 @@ pub trait Db {
         response_id: &str,
     ) -> Result<()>;
     async fn clear_last_openai_response_id(&self, local_chat_id: i32) -> Result<()>;
+    async fn set_kv<T: Serialize + Send + Sync + 'static>(
+        &self,
+        key: &str,
+        value: &T,
+    ) -> Result<()>;
+    async fn get_kv<T: DeserializeOwned + Send + 'static>(
+        &self,
+        key: &str,
+    ) -> Result<Option<(T, DateTime<Utc>)>>;
 }
 
 #[derive(Debug, Clone)]
 pub struct PostgresDb {
     pool: PgPool,
+    key_value_store: PostgresKeyValueStore,
 }
 
 impl PostgresDb {
@@ -59,7 +71,19 @@ impl PostgresDb {
             .with_context(|| "failed to run database migrations")?;
         tracing::info!("database migrations complete (postgresql).");
 
-        Ok(PostgresDb { pool })
+        let key_value_store = PostgresKeyValueStore::new(pool.clone());
+        Ok(PostgresDb {
+            pool,
+            key_value_store,
+        })
+    }
+
+    pub fn new_from_pool(pool: PgPool) -> Self {
+        let key_value_store = PostgresKeyValueStore::new(pool.clone());
+        Self {
+            pool,
+            key_value_store,
+        }
     }
 }
 
@@ -261,6 +285,14 @@ impl Db for PostgresDb {
         })?;
         Ok(())
     }
+
+    async fn set_kv<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()> {
+        self.key_value_store.set(key, value).await
+    }
+
+    async fn get_kv<T: DeserializeOwned>(&self, key: &str) -> Result<Option<(T, DateTime<Utc>)>> {
+        self.key_value_store.get(key).await
+    }
 }
 
 // struct to represent a message from history for openai
@@ -328,6 +360,7 @@ mod tests {
         // _pool is no longer directly used, but sqlx::test requires it.
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
         let user_data = mock_telegram_user(12345, "testuser");
 
@@ -356,6 +389,7 @@ mod tests {
     async fn test_upsert_chat(_pool: PgPool) -> Result<()> {
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
         let chat_data = mock_telegram_chat(67890, "private", "testchat");
 
@@ -384,6 +418,7 @@ mod tests {
     async fn test_insert_message(_pool: PgPool) -> Result<()> {
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
         let user_data = mock_telegram_user(111, "msguser");
         let local_user_id = db.upsert_user(&user_data).await?;
@@ -420,6 +455,7 @@ mod tests {
     async fn test_get_message_history(_pool: PgPool) -> Result<()> {
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
         let user = mock_telegram_user(777, "histuser");
         let local_user_id = db.upsert_user(&user).await?;
@@ -463,6 +499,7 @@ mod tests {
     async fn test_openai_response_id_handling(_pool: PgPool) -> Result<()> {
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
         let chat_data = mock_telegram_chat(999, "group", "openai_chat");
         let local_chat_id = db.upsert_chat(&chat_data).await?;
@@ -496,6 +533,7 @@ mod tests {
         // the new method itself contains the migration logic.
         let db = PostgresDb {
             pool: _pool.clone(),
+            key_value_store: PostgresKeyValueStore::new(_pool.clone()),
         };
 
         // we can do a simple query to ensure the pool is usable.

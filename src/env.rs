@@ -53,6 +53,7 @@ pub fn get_env_bool(key: &str) -> Option<bool> {
     })
 }
 
+#[derive(Clone)]
 pub struct EnvConfig {
     /// url of the beacon node
     pub beacon_url: Option<String>,

@@ -79,8 +79,7 @@ pub async fn execute_beacon_slot_check<B: BeaconNode>(
                         SlotStatus::Missed
                     } else {
                         SlotStatus::Error(format!(
-                            "beacon node responded with http status: {}",
-                            status_code
+                            "beacon node responded with http status: {status_code}"
                         ))
                     };
                     Ok(internal_status.to_json_string())
@@ -88,8 +87,7 @@ pub async fn execute_beacon_slot_check<B: BeaconNode>(
                 Err(e) => {
                     warn!(slot = slot_number, error = %e, "beacon_node.slot_status call failed");
                     let internal_status = SlotStatus::Error(format!(
-                        "failed to query beacon node for slot {}: {}",
-                        slot_number, e
+                        "failed to query beacon node for slot {slot_number}: {e}"
                     ));
                     Ok(internal_status.to_json_string())
                 }

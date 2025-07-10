@@ -156,8 +156,7 @@ pub async fn execute_conversation_admin_command(arguments_json_str: &str) -> Res
                         }
                     } else {
                         let err_msg = format!(
-                            "missing required argument: '{}' for command '{}'",
-                            MODEL_ID_PARAM_NAME, SET_OPENAI_MODEL_COMMAND_NAME
+                            "missing required argument: '{MODEL_ID_PARAM_NAME}' for command '{SET_OPENAI_MODEL_COMMAND_NAME}'"
                         );
                         warn!(args = %arguments_json_str, error = %err_msg);
                         Ok(json!({
@@ -169,8 +168,7 @@ pub async fn execute_conversation_admin_command(arguments_json_str: &str) -> Res
                     }
                 } else {
                     let err_msg = format!(
-                        "invalid command '{cmd}' specified. supported commands are: '{}', '{}'.",
-                        RESET_CONVERSATION_COMMAND_NAME, SET_OPENAI_MODEL_COMMAND_NAME
+                        "invalid command '{cmd}' specified. supported commands are: '{RESET_CONVERSATION_COMMAND_NAME}', '{SET_OPENAI_MODEL_COMMAND_NAME}'."
                     );
                     warn!(args = %arguments_json_str, error = %err_msg);
                     Ok(json!({ "status": "error", "message": err_msg }).to_string())
@@ -291,7 +289,7 @@ mod tests {
         assert!(!msg.contains("'command'"));
         assert_eq!(
             msg,
-            &format!("missing required argument: '{}'", ADMIN_CODE_PARAM_NAME)
+            &format!("missing required argument: '{ADMIN_CODE_PARAM_NAME}'")
         );
     }
 
@@ -321,7 +319,7 @@ mod tests {
         assert!(!msg.contains("'command'"));
         assert_eq!(
             msg,
-            &format!("missing required argument: '{}'", ADMIN_CODE_PARAM_NAME)
+            &format!("missing required argument: '{ADMIN_CODE_PARAM_NAME}'")
         );
     }
 
