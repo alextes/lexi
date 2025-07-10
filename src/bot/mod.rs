@@ -337,6 +337,21 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             )
                             .await
                             .context("failed to send conversation reset confirmation message")?;
+
+                            if let Err(e) = ctx
+                                .db
+                                .clear_last_openai_response_id(local_chat_id_for_conversation)
+                                .await
+                            {
+                                error!(
+                                    chat_id = incoming_message.chat.id,
+                                    local_chat_id = local_chat_id_for_conversation,
+                                    error = %e,
+                                    "critical: failed to clear last_openai_response_id in db for chat after reset."
+                                );
+                                // we'll continue, but the next message might be in the wrong context.
+                            }
+
                             info!(
                                 chat_id = incoming_message.chat.id,
                                 "conversation reset for chat."
