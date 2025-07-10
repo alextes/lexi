@@ -330,7 +330,7 @@ mod tests {
     use super::*;
     use crate::db::{MockDb, PostgresDb};
     use mockall::predicate::*;
-    use sqlx::PgPool;
+    use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, ConnectOptions, Postgres};
 
     #[tokio::test]
     async fn test_get_schema_cached() {
@@ -398,10 +398,10 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_live_fetcher_integration(pool: PgPool) {
+    async fn test_live_fetcher_integration(opt: PoolOptions<Postgres>, conn_opt: PgConnectOptions) {
+        let pool = opt.connect(conn_opt.to_url_lossy().as_ref()).await.unwrap();
         let db = PostgresDb::new_from_pool(pool);
-        let test_db_url = std::env::var("DATABASE_URL").unwrap();
-        let fetcher = LiveSchemaFetcher::new(Some(test_db_url.clone()), Some(test_db_url));
+        let fetcher = LiveSchemaFetcher::new(Some(conn_opt.to_url_lossy().to_string()), None);
 
         let fetched_schema_str = fetcher
             .fetch(&db, "mevdb") // use mevdb since we set the url for it
