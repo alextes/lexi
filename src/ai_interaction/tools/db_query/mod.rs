@@ -94,6 +94,8 @@ fn convert_db_value_to_json(
     // handle json/jsonb first, as it can be tricky for other types to handle
     if let Ok(v_json) = row.try_get::<JsonValue, _>(col_idx) {
         Ok(v_json)
+    } else if let Ok(v_vec_str) = row.try_get::<Vec<String>, _>(col_idx) {
+        Ok(json!(v_vec_str))
     } else if let Ok(v_str) = row.try_get::<String, _>(col_idx) {
         Ok(json!(v_str))
     } else if let Ok(v_i64) = row.try_get::<i64, _>(col_idx) {
@@ -470,6 +472,62 @@ mod tests {
         );
 
         // 6. cleanup - not needed, sqlx::test handles rollback
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_execute_db_query_common_with_text_array(pool: PgPool) -> Result<()> {
+        // 1. create table with text array column
+        sqlx::query("CREATE TABLE test_text_array (id SERIAL PRIMARY KEY, tags TEXT[]);")
+            .execute(&pool)
+            .await?;
+
+        // 2. insert data
+        sqlx::query(
+            "INSERT INTO test_text_array (tags) VALUES
+                ('{rust,postgres,sqlx}'),
+                (NULL),
+                ('{\"single-item\"}'),
+                ('{}');", // empty array
+        )
+        .execute(&pool)
+        .await?;
+
+        // 3. select data
+        let select_data_query = "SELECT id, tags FROM test_text_array ORDER BY id;";
+        let result_json_value =
+            execute_db_query_common(&pool, select_data_query, "test_text_array").await;
+
+        // 4. verify results
+        let arr = result_json_value.as_array().ok_or_else(|| {
+            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
+        })?;
+        assert_eq!(arr.len(), 4);
+
+        // row 0: {rust,postgres,sqlx}
+        let row0 = arr[0].as_object().unwrap();
+        assert_eq!(
+            row0.get("tags").unwrap(),
+            &json!(["rust", "postgres", "sqlx"])
+        );
+
+        // row 1: NULL
+        let row1 = arr[1].as_object().unwrap();
+        assert!(row1.get("tags").unwrap().is_null());
+
+        // row 2: {"single-item"}
+        let row2 = arr[2].as_object().unwrap();
+        assert_eq!(row2.get("tags").unwrap(), &json!(["single-item"]));
+
+        // row 3: {}
+        let row3 = arr[3].as_object().unwrap();
+        assert_eq!(
+            row3.get("tags").unwrap(),
+            &json!([]) as &JsonValue,
+            "row 3 tags mismatch. got: {:?}",
+            row3.get("tags")
+        );
+
         Ok(())
     }
 }
