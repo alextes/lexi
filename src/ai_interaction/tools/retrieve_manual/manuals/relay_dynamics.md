@@ -31,3 +31,11 @@ some tables will feature a `geo` column. ultra sound operates block auctions in 
 ## proposers
 
 when asked information about the proposer, you usually need to work from a proposer_pubkey or pubkey column in a proposer table, from there you can use `proposer_labels_with_imputed_data_view` in mevdb + the `pubkey` column to find the `label` which is the proposer or node operator name. `validators` in mevdb also contains proposer information. validator is a synonym for proposer. node operators are professional companies which manage many proposers. prefer `proposer_labels_with_imputed_data_view` over `proposer_labels` in mevdb when looking up proposer info.
+
+## registrations
+
+proposers register with the relay by submitting a registration request. the relay will then look at the ethereum lookahead window and tell any who ask, which of the next proposers in line to propose a block are registered with the relay. these are referred to as proposer duties. block builders then use these proposer duties to decide in which slot to submit their bids to the relay. registrations can be found in `validator_registrations` in globaldb.
+
+### transaction_filter
+
+one interesting column in `validator_registrations` is `transaction_filter`. this column contains a string which indicates whether the proposer has asked for a transaction filter to be applied to all blocks built for them. the feature is currently used by US based proposers aka node operators to comply with the OFAC sanctions list which lists some ethereum addresses. consequently, the proposer wants for the relay to reject any block which contains any transactions matching the filter list. current values for the column are: `none` and `ofac`.
