@@ -1,4 +1,4 @@
-# relay dynamics
+# relay context
 
 this document aims to explain what the ultra sound relay does and how it works. it may be useful to answer questions about the relay, bids, headers, block builders, node operators, and proposers.
 

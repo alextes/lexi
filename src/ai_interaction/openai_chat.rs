@@ -47,7 +47,7 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         you are a helpful ai assistant named lexi.
         your main mode of communication is through telegram, responses will automatically be sent to the telegram chat.
         you are part of the team running the ultra sound relay, and in this context may be asked to lend a hand.
-        whenever functioning as the ultra sound relay assistant, the manual `relay_dynamics` is available to provide more context.
+        whenever functioning as the ultra sound relay assistant, the manual `relay_context` is available to provide more context.
     "}
     .to_string();
     OpenAiCallConfig {

@@ -17,7 +17,7 @@ use tracing::{error, info, instrument, warn};
 
 pub const RETRIEVE_MANUAL_TOOL_NAME: &str = "retrieve_manual";
 const GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME: &str = "generate_proposer_reimbursement";
-const RELAY_DYNAMICS_MANUAL_NAME: &str = "relay_dynamics";
+const RELAY_CONTEXT_MANUAL_NAME: &str = "relay_context";
 
 #[derive(Debug, serde::Deserialize)]
 struct RetrieveManualArgs {
@@ -29,8 +29,8 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     params_props.insert(
         "manual_name".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
-            .description("the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement', 'relay_dynamics'"            )
-            .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME, RELAY_DYNAMICS_MANUAL_NAME])
+            .description("the name of the manual to retrieve. available manuals: 'generate_proposer_reimbursement', 'relay_context'"            )
+            .enum_string(&[GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME, RELAY_CONTEXT_MANUAL_NAME])
             .build(),
     );
     let tool_params = ToolFunctionParameters {
@@ -46,7 +46,7 @@ pub static RETRIEVE_MANUAL_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
                 retrieves the content of a specified manual. this tool provides access to instructional documents for various tasks.
                 available manuals:
                 1. 'generate_proposer_reimbursement' - explains how to generate a proposer reimbursement.
-                2. 'relay_dynamics' - gives context on ultra sound relay, bids, headers, block builders, adjustments, optimistic simulation, node operators, proposers, and how the relay earns revenue. when asked about anything related to these topics or the relay, make sure you've fetched the manual at least once.
+                2. 'relay_context' - gives context on ultra sound relay, bids, headers, block builders, adjustments, optimistic simulation, node operators, proposers, and how the relay earns revenue. when asked about anything related to these topics or the relay, make sure you've fetched the manual at least once.
             "}
             .to_string(),
         ),
@@ -61,7 +61,7 @@ fn get_manual_content(manual_name: &str) -> Result<String> {
         GENERATE_PROPOSER_REIMBURSEMENT_MANUAL_NAME => {
             Ok(include_str!("manuals/generate_proposer_reimbursement.md").to_string())
         }
-        RELAY_DYNAMICS_MANUAL_NAME => Ok(include_str!("manuals/relay_dynamics.md").to_string()),
+        RELAY_CONTEXT_MANUAL_NAME => Ok(include_str!("manuals/relay_context.md").to_string()),
         _ => {
             error!(%manual_name, "attempted to retrieve unknown manual");
             anyhow::bail!("unknown manual name: {}", manual_name)
