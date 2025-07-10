@@ -8,6 +8,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use lexi::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
+use lexi::ai_interaction::tools::db_schema::LiveSchemaFetcher;
 use lexi::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use lexi::ai_interaction::{self, HandlerContext as AiInteractionHandlerContext}; // Aliasing for clarity
 use lexi::env::ENV_CONFIG;
@@ -55,28 +56,40 @@ async fn main() -> Result<()> {
     let openai_api_key =
         std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set, it is required.")?;
 
+    let beacon_node = BeaconNodeHttp::new(
+        http_client.clone(),
+        ENV_CONFIG
+            .beacon_url
+            .clone()
+            .expect("BEACON_URL is required in env config."),
+    );
+
+    let relay_circuit_breaker = RelayCircuitBreaker::new(
+        http_client.clone(),
+        ENV_CONFIG
+            .relay_admin_token
+            .clone()
+            .expect("RELAY_ADMIN_TOKEN is required in env config."),
+        ENV_CONFIG
+            .relay_url
+            .clone()
+            .expect("RELAY_URL is required in env config."),
+    );
+
+    let schema_fetcher = LiveSchemaFetcher::new(
+        ENV_CONFIG.mevdb_database_url.clone(),
+        ENV_CONFIG.globaldb_database_url.clone(),
+    );
+
     // Create the simplified HandlerContext for ai_interaction
     let ai_interaction_handler_ctx = AiInteractionHandlerContext {
         db,
-        http_client: http_client.clone(),
+        http_client,
         bot_db_id: DEFAULT_BOT_DB_ID, // A dummy value, as it's less relevant for pure CLI testing of AI
-        openai_api_key: &openai_api_key,
-        beacon_node: BeaconNodeHttp::new(
-            ENV_CONFIG
-                .beacon_url
-                .clone()
-                .expect("BEACON_URL is required in env config."),
-        ),
-        relay_circuit_breaker: RelayCircuitBreaker::new(
-            ENV_CONFIG
-                .relay_admin_token
-                .clone()
-                .expect("RELAY_ADMIN_TOKEN is required in env config."),
-            ENV_CONFIG
-                .relay_url
-                .clone()
-                .expect("RELAY_URL is required in env config."),
-        ),
+        openai_api_key,
+        beacon_node,
+        relay_circuit_breaker,
+        schema_fetcher,
     };
 
     info!(

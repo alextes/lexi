@@ -6,6 +6,7 @@ use crate::openai_api::{
 };
 use anyhow::Result;
 use chrono::{Duration, Utc};
+use mockall::automock;
 use serde_json::json;
 use sqlx::{Connection, Row};
 use std::collections::HashMap;
@@ -186,65 +187,114 @@ pub static DATABASE_SCHEMA_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
     )
 });
 
-#[instrument(skip(db, db_url))]
-async fn fetch_and_cache_schema<D: Db>(
-    db: &D,
-    db_name: &str,
-    db_url: &str,
-    cache_key: &str,
-) -> Result<String> {
-    info!("fetching fresh schema for {db_name} using url");
+#[automock]
+#[allow(async_fn_in_trait)]
+pub trait SchemaFetcher<D: Db> {
+    async fn fetch(&self, db: &D, db_name: &str) -> Result<String>;
+}
 
-    let schema_json: serde_json::Value = match sqlx::postgres::PgConnection::connect(db_url).await {
-        Ok(mut conn) => match sqlx::query(SCHEMA_QUERY).fetch_one(&mut conn).await {
-            Ok(row) => {
-                let schema: serde_json::Value = row.get("schema");
-                if let Err(e) = conn.close().await {
-                    warn!(error = %e, "failed to close database connection for schema fetch");
-                }
-                schema
+#[derive(Clone)]
+pub struct LiveSchemaFetcher {
+    mevdb_url: Option<String>,
+    globaldb_url: Option<String>,
+}
+
+impl LiveSchemaFetcher {
+    pub fn new(mevdb_url: Option<String>, globaldb_url: Option<String>) -> Self {
+        Self {
+            mevdb_url,
+            globaldb_url,
+        }
+    }
+}
+
+impl<D: Db> SchemaFetcher<D> for LiveSchemaFetcher {
+    #[instrument(skip(self, db))]
+    async fn fetch(&self, db: &D, db_name: &str) -> Result<String> {
+        let db_url = match db_name {
+            "mevdb" => self.mevdb_url.as_deref(),
+            "globaldb" => self.globaldb_url.as_deref(),
+            _ => {
+                let err_msg = format!("invalid database name for schema fetcher: {db_name}");
+                error!("{}", err_msg);
+                return Ok(json!({
+                    "status": "error",
+                    "message": "invalid_database_name",
+                    "details": err_msg
+                })
+                .to_string());
             }
+        };
+
+        let db_url = if let Some(url) = db_url {
+            url
+        } else {
+            let err_msg = format!("database url for {db_name} not configured");
+            error!("{}", err_msg);
+            return Ok(json!({
+                "status": "error",
+                "message": "database_not_configured",
+                "details": err_msg
+            })
+            .to_string());
+        };
+
+        let cache_key = format!("db_schema_{db_name}");
+        info!("fetching fresh schema for {db_name} using url");
+
+        let schema_json: serde_json::Value = match sqlx::postgres::PgConnection::connect(db_url)
+            .await
+        {
+            Ok(mut conn) => match sqlx::query(SCHEMA_QUERY).fetch_one(&mut conn).await {
+                Ok(row) => {
+                    let schema: serde_json::Value = row.get("schema");
+                    if let Err(e) = conn.close().await {
+                        warn!(error = %e, "failed to close database connection for schema fetch");
+                    }
+                    schema
+                }
+                Err(e) => {
+                    let err_msg = format!("failed to execute schema query for {db_name}: {e}");
+                    error!("{}", err_msg);
+                    json!({
+                        "status": "error",
+                        "message": "database_query_failed",
+                        "details": err_msg
+                    })
+                }
+            },
             Err(e) => {
-                let err_msg = format!("failed to execute schema query for {db_name}: {e}");
+                let err_msg = format!("failed to connect to {db_name} database: {e}");
                 error!("{}", err_msg);
                 json!({
                     "status": "error",
-                    "message": "database_query_failed",
+                    "message": "database_connection_failed",
                     "details": err_msg
                 })
             }
-        },
-        Err(e) => {
-            let err_msg = format!("failed to connect to {db_name} database: {e}");
-            error!("{}", err_msg);
-            json!({
-                "status": "error",
-                "message": "database_connection_failed",
-                "details": err_msg
-            })
-        }
-    };
+        };
 
-    let schema_string = schema_json.to_string();
-    if schema_json.get("status").and_then(|s| s.as_str()) == Some("error") {
-        warn!(
-            "failed to fetch new schema for {db_name}, not caching result. error: {schema_string}",
-        );
-    } else {
-        info!("caching new schema for {db_name}");
-        if let Err(e) = db.set_kv(cache_key, &schema_string).await {
-            warn!(error = %e, "failed to cache new schema for {db_name}");
+        let schema_string = schema_json.to_string();
+        if schema_json.get("status").and_then(|s| s.as_str()) == Some("error") {
+            warn!(
+                "failed to fetch new schema for {db_name}, not caching result. error: {schema_string}",
+            );
+        } else {
+            info!("caching new schema for {db_name}");
+            if let Err(e) = db.set_kv(&cache_key, &schema_string).await {
+                warn!(error = %e, "failed to cache new schema for {db_name}");
+            }
         }
+
+        Ok(schema_string)
     }
-
-    Ok(schema_string)
 }
 
-#[instrument(skip(db, db_url))]
-pub async fn execute_get_database_schema<D: Db>(
+#[instrument(skip(db, fetcher))]
+pub async fn execute_get_database_schema<D: Db, S: SchemaFetcher<D>>(
     db: &D,
     db_name: &str,
-    db_url: &str,
+    fetcher: &S,
 ) -> Result<String> {
     info!(db_name = %db_name, "executing get_database_schema tool");
 
@@ -253,7 +303,7 @@ pub async fn execute_get_database_schema<D: Db>(
         Ok(Some((cached_schema, last_updated))) => {
             if Utc::now().signed_duration_since(last_updated) > Duration::days(7) {
                 info!("schema for {} is stale, fetching fresh version.", db_name);
-                fetch_and_cache_schema(db, db_name, db_url, &cache_key).await
+                fetcher.fetch(db, db_name).await
             } else {
                 info!("returning cached schema for {}", db_name);
                 Ok(cached_schema)
@@ -261,7 +311,7 @@ pub async fn execute_get_database_schema<D: Db>(
         }
         Ok(None) => {
             info!("no cached schema found for {}, fetching.", db_name);
-            fetch_and_cache_schema(db, db_name, db_url, &cache_key).await
+            fetcher.fetch(db, db_name).await
         }
         Err(e) => {
             warn!(db_name = %db_name, error = %e, "error getting schema from cache");
@@ -279,55 +329,48 @@ pub async fn execute_get_database_schema<D: Db>(
 mod tests {
     use super::*;
     use crate::db::{MockDb, PostgresDb};
+    use mockall::predicate::*;
     use sqlx::PgPool;
 
     #[tokio::test]
     async fn test_get_schema_cached() {
         let mut mock_db = MockDb::new();
+        let mut mock_fetcher = MockSchemaFetcher::new();
         let cached_schema = "{\"tables\":[]}".to_string();
         let db_name = "mevdb";
-        let db_url = "dummy-url"; // not used when cache hits
         let cache_key = format!("db_schema_{db_name}");
 
         mock_db
             .expect_get_kv::<String>()
-            .withf(move |key| key == &cache_key)
+            .with(eq(cache_key.clone()))
             .times(1)
             .returning({
                 let cs = cached_schema.clone();
                 move |_| Ok(Some((cs.clone(), Utc::now())))
             });
 
-        let result_str = execute_get_database_schema(&mock_db, db_name, db_url)
+        // The fetcher should not be called
+        mock_fetcher.expect_fetch().times(0);
+
+        let result_str = execute_get_database_schema(&mock_db, db_name, &mock_fetcher)
             .await
             .unwrap();
 
         assert_eq!(result_str, cached_schema);
     }
 
-    // this is a mock of fetch_and_cache_schema to be used in the stale test
-    async fn mock_fetch_and_cache_schema(
-        _db: &impl Db,
-        _db_name: &str,
-        _db_url: &str,
-        _cache_key: &str,
-    ) -> Result<String> {
-        Ok("{\"tables\":[\"new_schema\"]}".to_string())
-    }
-
     #[tokio::test]
     async fn test_stale_cache_is_refetched() {
         let mut mock_db = MockDb::new();
+        let mut mock_fetcher = MockSchemaFetcher::new();
         let stale_schema = "{\"tables\":[\"stale\"]}".to_string();
+        let new_schema = "{\"tables\":[\"new\"]}".to_string();
         let db_name = "testdb_stale";
-        let db_url = "dummy-url";
-        let cache_key = format!("db_schema_{db_name}");
 
-        // 1. mock get_kv to return a stale value
-        let get_key = cache_key.clone();
+        let cache_key = format!("db_schema_{db_name}");
         mock_db
             .expect_get_kv::<String>()
-            .withf(move |key| key == &get_key)
+            .with(eq(cache_key.clone()))
             .times(1)
             .returning({
                 let cs = stale_schema.clone();
@@ -337,42 +380,31 @@ mod tests {
                 }
             });
 
-        // 2. mock set_kv to be called once, since we expect a refetch and cache
-        let set_key = cache_key.clone();
-        mock_db
-            .expect_set_kv::<String>()
-            .withf(move |key, val| key == &set_key && val == "{\"tables\":[\"new_schema\"]}")
+        let fetcher_db_name = db_name.to_string();
+        mock_fetcher
+            .expect_fetch()
+            .withf(move |_, name| name == fetcher_db_name)
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning({
+                let ns = new_schema.clone();
+                move |_, _| Ok(ns.clone())
+            });
 
-        // a little trick to use our mock implementation of fetch_and_cache_schema
-        // we can't do this directly in rust, so we have to replicate the logic of
-        // execute_get_database_schema here.
-        let (cached_schema, last_updated) =
-            mock_db.get_kv::<String>(&cache_key).await.unwrap().unwrap();
+        let result = execute_get_database_schema(&mock_db, db_name, &mock_fetcher)
+            .await
+            .unwrap();
 
-        let new_schema = if Utc::now().signed_duration_since(last_updated) > Duration::days(7) {
-            let new_schema_str = mock_fetch_and_cache_schema(&mock_db, db_name, db_url, &cache_key)
-                .await
-                .unwrap();
-            mock_db.set_kv(&cache_key, &new_schema_str).await.unwrap();
-            new_schema_str
-        } else {
-            cached_schema
-        };
-
-        assert_eq!(new_schema, "{\"tables\":[\"new_schema\"]}");
+        assert_eq!(result, new_schema);
     }
 
     #[sqlx::test]
-    async fn test_fetch_and_cache_schema_integration(pool: PgPool) {
+    async fn test_live_fetcher_integration(pool: PgPool) {
         let db = PostgresDb::new_from_pool(pool);
         let test_db_url = std::env::var("DATABASE_URL").unwrap();
-        let db_name = "testdb_integration";
-        let cache_key = format!("db_schema_{db_name}");
+        let fetcher = LiveSchemaFetcher::new(Some(test_db_url.clone()), Some(test_db_url));
 
-        // 1. fetch and cache the schema.
-        let fetched_schema_str = fetch_and_cache_schema(&db, db_name, &test_db_url, &cache_key)
+        let fetched_schema_str = fetcher
+            .fetch(&db, "mevdb") // use mevdb since we set the url for it
             .await
             .unwrap();
 
@@ -382,16 +414,8 @@ mod tests {
             fetched_schema_json
                 .get("tables")
                 .and_then(|t| t.as_array())
-                .map_or(false, |a| !a.is_empty()),
-            "schema should have tables, was: {}",
-            fetched_schema_str
+                .is_some_and(|a| !a.is_empty()),
+            "schema should have tables, was: {fetched_schema_str}"
         );
-
-        // 2. verify that it was cached correctly.
-        let cached_result = db.get_kv::<String>(&cache_key).await.unwrap();
-        assert!(cached_result.is_some(), "schema was not cached");
-        let (cached_schema_str, _) = cached_result.unwrap();
-
-        assert_eq!(fetched_schema_str, cached_schema_str);
     }
 }

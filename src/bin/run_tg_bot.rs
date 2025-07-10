@@ -11,6 +11,10 @@
 //! this file lives at `src/bin/run_tg_bot.rs`.
 
 use anyhow::{Context, Result};
+use lexi::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
+use lexi::ai_interaction::tools::db_schema::LiveSchemaFetcher;
+use lexi::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
+use lexi::bot::BotContext;
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::time::Duration;
@@ -67,5 +71,42 @@ async fn main() -> Result<()> {
         bot_db_id, "bot user data upserted into database"
     );
 
-    run_bot_loop(db_conn, bot_token, openai_api_key, bot_db_id).await
+    let schema_fetcher = LiveSchemaFetcher::new(
+        ENV_CONFIG.mevdb_database_url.clone(),
+        ENV_CONFIG.globaldb_database_url.clone(),
+    );
+
+    let beacon_node = BeaconNodeHttp::new(
+        reqwest_client.clone(),
+        ENV_CONFIG
+            .beacon_url
+            .clone()
+            .expect("BEACON_URL is required in env config."),
+    );
+
+    let relay_circuit_breaker = RelayCircuitBreaker::new(
+        reqwest_client.clone(),
+        ENV_CONFIG
+            .relay_admin_token
+            .clone()
+            .expect("RELAY_ADMIN_TOKEN is required in env config."),
+        ENV_CONFIG
+            .relay_url
+            .clone()
+            .expect("RELAY_URL is required in env config."),
+    );
+
+    let bot_ctx = BotContext {
+        db: db_conn,
+        http_client: reqwest_client,
+        api_base_url: TELEGRAM_API_URL.to_string(),
+        bot_token,
+        bot_db_id,
+        openai_api_key,
+        schema_fetcher,
+        beacon_node,
+        relay_circuit_breaker,
+    };
+
+    run_bot_loop(bot_ctx).await
 }

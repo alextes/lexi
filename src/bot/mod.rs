@@ -14,10 +14,10 @@
 pub mod r#loop;
 
 use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
+use crate::ai_interaction::tools::db_schema::LiveSchemaFetcher;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use crate::ai_interaction::{self, AiConversationOutcome};
 use crate::db::Db;
-use crate::env::ENV_CONFIG;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use anyhow::{Context, Result};
@@ -28,13 +28,16 @@ use tracing::{debug, error, info, warn};
 
 // context struct required by bot logic to interact with various services.
 #[derive(Clone)]
-pub struct BotContext<'a, D: Db> {
+pub struct BotContext<D: Db> {
     pub db: D,
     pub http_client: ReqwestClient,
-    pub api_base_url: &'a str, // telegram api base
-    pub bot_token: &'a str,
+    pub api_base_url: String, // telegram api base
+    pub bot_token: String,
     pub bot_db_id: i32, // bot's own id in the users table
-    pub openai_api_key: &'a str,
+    pub openai_api_key: String,
+    pub schema_fetcher: LiveSchemaFetcher,
+    pub beacon_node: BeaconNodeHttp,
+    pub relay_circuit_breaker: RelayCircuitBreaker,
 }
 
 const BOT_USERNAME: &str = "@lexi_alex_bot";
@@ -98,7 +101,7 @@ pub fn log_other_mentions(message: &TelegramMessage) {
 }
 
 pub async fn send_reply_and_update_state<D: Db>(
-    ctx: &BotContext<'_, D>,
+    ctx: &BotContext<D>,
     telegram_chat_id: i64,
     local_chat_id_for_db: i32,
     reply_text: &str,
@@ -111,8 +114,8 @@ pub async fn send_reply_and_update_state<D: Db>(
     );
     let sent_bot_message = telegram::send_message(
         &ctx.http_client,
-        ctx.api_base_url,
-        ctx.bot_token,
+        &ctx.api_base_url,
+        &ctx.bot_token,
         telegram_chat_id,
         reply_text,
     )
@@ -169,7 +172,7 @@ pub async fn send_reply_and_update_state<D: Db>(
 }
 
 pub async fn handle_telegram_update<D: Db + Clone>(
-    ctx: &BotContext<'_, D>,
+    ctx: &BotContext<D>,
     update: &TelegramUpdate,
 ) -> Result<()> {
     debug!(?update, "processing update");
@@ -273,30 +276,14 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
                 let current_model_id_for_ai_call = ai_interaction::get_current_model_id().await;
 
-                let beacon_url_for_handler = match crate::env::ENV_CONFIG.beacon_url.clone() {
-                    Some(url) => url,
-                    None => {
-                        warn!("BEACON_URL is not set in ENV_CONFIG, beacon-dependent tools will fail.");
-                        String::new() // Default to empty string if not set
-                    }
-                };
-
-                let relay_url = ENV_CONFIG
-                    .relay_url
-                    .clone()
-                    .expect("RELAY_URL is required in env.");
-                let relay_admin_token = ENV_CONFIG
-                    .relay_admin_token
-                    .clone()
-                    .expect("RELAY_ADMIN_TOKEN is required in env.");
-
                 let mp_ctx = ai_interaction::HandlerContext {
                     db: ctx.db.clone(),
                     http_client: ctx.http_client.clone(),
                     bot_db_id: ctx.bot_db_id,
-                    openai_api_key: ctx.openai_api_key,
-                    beacon_node: BeaconNodeHttp::new(beacon_url_for_handler),
-                    relay_circuit_breaker: RelayCircuitBreaker::new(relay_admin_token, relay_url),
+                    openai_api_key: ctx.openai_api_key.clone(),
+                    beacon_node: ctx.beacon_node.clone(),
+                    relay_circuit_breaker: ctx.relay_circuit_breaker.clone(),
+                    schema_fetcher: ctx.schema_fetcher.clone(),
                 };
 
                 match ai_interaction::drive_ai_conversation(
@@ -343,8 +330,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
                             telegram::send_message(
                                 &ctx.http_client,
-                                ctx.api_base_url,
-                                ctx.bot_token,
+                                ctx.api_base_url.as_str(),
+                                ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                             )
@@ -382,8 +369,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             };
                             telegram::send_message(
                                 &ctx.http_client,
-                                ctx.api_base_url,
-                                ctx.bot_token,
+                                ctx.api_base_url.as_str(),
+                                ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                             )

@@ -6,7 +6,8 @@
 
 use crate::{
     ai_interaction::tools::{
-        beacon_slot_check::BeaconNode, relay_circuit_breaker::RelayCircuitBreaker,
+        beacon_slot_check::BeaconNode, db_schema::LiveSchemaFetcher,
+        relay_circuit_breaker::RelayCircuitBreaker,
     },
     db::Db,
 }; // import the db trait
@@ -57,18 +58,19 @@ pub enum AiConversationOutcome {
     ChangeModel(String, String, String),
 }
 
-pub struct HandlerContext<'a, D: Db, B: BeaconNode> {
+pub struct HandlerContext<D: Db, B: BeaconNode> {
     pub db: D,
     pub http_client: ReqwestClient,
     pub bot_db_id: i32, // kept as some tools/logging might still reference it via context
-    pub openai_api_key: &'a str,
+    pub openai_api_key: String,
     pub beacon_node: B,
     pub relay_circuit_breaker: RelayCircuitBreaker,
+    pub schema_fetcher: LiveSchemaFetcher,
 }
 
 #[instrument(skip(ctx, prompt_text, previous_response_id))]
 pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
-    ctx: &HandlerContext<'_, D, B>,
+    ctx: &HandlerContext<D, B>,
     prompt_text: &str,
     previous_response_id: Option<&str>,
     current_model_id: &str,
@@ -106,7 +108,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
 
     match call_responses_api(
         ctx.http_client.clone(),
-        ctx.openai_api_key,
+        &ctx.openai_api_key,
         input_items.clone(),
         initial_api_args,
     )
@@ -130,7 +132,7 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
 
 #[instrument(skip(ctx, prompt_text))]
 pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
-    ctx: &HandlerContext<'_, D, B>,
+    ctx: &HandlerContext<D, B>,
     prompt_text: &str,
 ) -> Result<(String, String)> {
     info!(

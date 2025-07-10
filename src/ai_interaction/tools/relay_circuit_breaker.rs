@@ -57,7 +57,7 @@ pub static RELAY_CIRCUIT_BREAKER_TOOL: LazyLock<ToolDefinition> = LazyLock::new(
     )
 });
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct RelayCircuitBreaker {
     http_client: ReqwestClient,
     admin_token: String,
@@ -65,9 +65,9 @@ pub struct RelayCircuitBreaker {
 }
 
 impl RelayCircuitBreaker {
-    pub fn new(admin_token: String, base_url: String) -> Self {
+    pub fn new(http_client: ReqwestClient, admin_token: String, base_url: String) -> Self {
         Self {
-            http_client: ReqwestClient::new(),
+            http_client,
             admin_token,
             base_url,
         }
@@ -230,9 +230,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_server_url = server.url();
         let token = "test_token_success";
+        let http_client = ReqwestClient::new();
 
         let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
+            RelayCircuitBreaker::new(http_client, token.to_string(), mock_server_url.clone());
 
         // Mockito path should be relative to server.url()
         let mock_path = format!(
@@ -268,9 +269,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_server_url = server.url();
         let token = "test_token_auction_disabled";
+        let http_client = ReqwestClient::new();
 
         let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
+            RelayCircuitBreaker::new(http_client, token.to_string(), mock_server_url.clone());
 
         let mock_path = format!(
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
@@ -304,9 +306,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_server_url = server.url();
         let token = "test_token_execute_adj";
+        let http_client = ReqwestClient::new();
 
         let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
+            RelayCircuitBreaker::new(http_client, token.to_string(), mock_server_url.clone());
 
         let mock_path = format!(
             "/ultrasound/v1/admin/{ADJUSTMENT_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
@@ -344,9 +347,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_server_url = server.url();
         let token = "test_token_execute_auc";
+        let http_client = ReqwestClient::new();
 
         let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
+            RelayCircuitBreaker::new(http_client, token.to_string(), mock_server_url.clone());
 
         let mock_path = format!(
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=false"
@@ -384,9 +388,13 @@ mod tests {
         let token = "test_token_failure";
         // Use a base_url that won't resolve or connect.
         let non_existent_base_url = "http://localhost:12345"; // Assume this port is not listening
+        let http_client = ReqwestClient::new();
 
-        let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), non_existent_base_url.to_string());
+        let circuit_breaker_client = RelayCircuitBreaker::new(
+            http_client,
+            token.to_string(),
+            non_existent_base_url.to_string(),
+        );
 
         let result = circuit_breaker_client
             .set_state(ADJUSTMENT_CIRCUIT_BREAKER_PATH, true)
@@ -403,9 +411,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_server_url = server.url();
         let token = "test_token_relay_error";
+        let http_client = ReqwestClient::new();
 
         let circuit_breaker_client =
-            RelayCircuitBreaker::new(token.to_string(), mock_server_url.clone());
+            RelayCircuitBreaker::new(http_client, token.to_string(), mock_server_url.clone());
 
         let mock_path = format!(
             "/ultrasound/v1/admin/{AUCTION_CIRCUIT_BREAKER_PATH}?token={token}&enable=true"
@@ -437,8 +446,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_command_argument_in_execute_tool() {
-        let circuit_breaker_client =
-            RelayCircuitBreaker::new("token".to_string(), "http://base.url".to_string());
+        let http_client = ReqwestClient::new();
+        let circuit_breaker_client = RelayCircuitBreaker::new(
+            http_client,
+            "token".to_string(),
+            "http://base.url".to_string(),
+        );
 
         let args_json = json!({
             COMMAND_PARAM: "invalid_command_name",
@@ -461,8 +474,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_enabled_argument_in_execute_tool() {
-        let circuit_breaker_client =
-            RelayCircuitBreaker::new("token".to_string(), "http://base.url".to_string());
+        let http_client = ReqwestClient::new();
+        let circuit_breaker_client = RelayCircuitBreaker::new(
+            http_client,
+            "token".to_string(),
+            "http://base.url".to_string(),
+        );
 
         let args_json = json!({
             COMMAND_PARAM: SET_ADJUSTMENT_CIRCUIT_BREAKER_COMMAND
@@ -488,8 +505,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_malformed_arguments_json_in_execute_tool() {
-        let circuit_breaker_client =
-            RelayCircuitBreaker::new("token".to_string(), "http://base.url".to_string());
+        let http_client = ReqwestClient::new();
+        let circuit_breaker_client = RelayCircuitBreaker::new(
+            http_client,
+            "token".to_string(),
+            "http://base.url".to_string(),
+        );
 
         let args_json_str = "this is not json";
         let result_str = execute_relay_circuit_breaker_tool(&circuit_breaker_client, args_json_str)

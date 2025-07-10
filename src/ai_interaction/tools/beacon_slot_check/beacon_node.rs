@@ -16,11 +16,8 @@ pub struct BeaconNodeHttp {
 }
 
 impl BeaconNodeHttp {
-    pub fn new(url: String) -> Self {
-        Self {
-            client: Client::new(),
-            url,
-        }
+    pub fn new(client: Client, url: String) -> Self {
+        Self { client, url }
     }
 }
 
@@ -61,7 +58,8 @@ mod tests {
             .create_async()
             .await;
 
-        let beacon_node = BeaconNodeHttp::new(server.url());
+        let client = Client::new();
+        let beacon_node = BeaconNodeHttp::new(client, server.url());
         let result = beacon_node.slot_status(slot_number).await;
 
         mock.assert_async().await;
@@ -83,7 +81,8 @@ mod tests {
             .create_async()
             .await;
 
-        let beacon_node = BeaconNodeHttp::new(server.url());
+        let client = Client::new();
+        let beacon_node = BeaconNodeHttp::new(client, server.url());
         let result = beacon_node.slot_status(slot_number).await;
 
         mock.assert_async().await;
@@ -106,7 +105,8 @@ mod tests {
             .create_async()
             .await;
 
-        let beacon_node = BeaconNodeHttp::new(server.url());
+        let client = Client::new();
+        let beacon_node = BeaconNodeHttp::new(client, server.url());
         let result = beacon_node.slot_status(slot_number).await;
 
         mock.assert_async().await;
@@ -119,8 +119,9 @@ mod tests {
     #[tokio::test]
     async fn test_beacon_node_http_request_failed() {
         let slot_number = 789101;
+        let client = Client::new();
         // use an invalid port to ensure a connection refused error
-        let beacon_node = BeaconNodeHttp::new("http://127.0.0.1:3".to_string());
+        let beacon_node = BeaconNodeHttp::new(client, "http://127.0.0.1:3".to_string());
 
         let result = beacon_node.slot_status(slot_number).await;
 

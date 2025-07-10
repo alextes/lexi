@@ -9,7 +9,6 @@
 use super::{AiConversationOutcome, BeaconNode};
 use crate::{
     db::Db,
-    env::ENV_CONFIG,
     openai_api::{
         self, ApiToolType, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
         OpenAiApiResponse, OutputFunctionCall, OutputItem, WebSearchToolConfig,
@@ -17,7 +16,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use indoc::indoc;
-use serde_json::{json, Value as JsonValue};
+use serde_json::Value as JsonValue;
 use tracing::{debug, error, info, instrument, warn};
 
 // add these imports
@@ -101,7 +100,7 @@ fn parse_api_response_output(
 /// executes a single tool function call based on its name.
 #[instrument(skip(ctx, fc_request), fields(tool_name = %fc_request.name))]
 async fn execute_tool_call<D: Db, B: BeaconNode>(
-    ctx: &super::HandlerContext<'_, D, B>,
+    ctx: &super::HandlerContext<D, B>,
     fc_request: &OutputFunctionCall,
 ) -> Result<String> {
     use super::tools::*;
@@ -116,33 +115,7 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
             .with_context(|| format!("failed to parse args for {tool_name}"))?;
         let db_name = args.database_name;
 
-        let db_url = match db_name.as_str() {
-            "mevdb" => ENV_CONFIG.mevdb_database_url.as_deref(),
-            "globaldb" => ENV_CONFIG.globaldb_database_url.as_deref(),
-            _ => {
-                warn!(db_name = %db_name, "invalid database name provided for schema tool");
-                return Ok(json!({
-                    "status": "error",
-                    "message": "invalid_database_name",
-                    "details": format!("database_name must be 'mevdb' or 'globaldb', got: {db_name}")
-                }).to_string());
-            }
-        };
-
-        let db_url = if let Some(url) = db_url {
-            url
-        } else {
-            let err_msg = format!("database url for {db_name} not configured");
-            warn!("{err_msg}");
-            return Ok(json!({
-                "status": "error",
-                "message": "database_not_configured",
-                "details": err_msg
-            })
-            .to_string());
-        };
-
-        db_schema::execute_get_database_schema(&ctx.db, &db_name, db_url).await
+        db_schema::execute_get_database_schema(&ctx.db, &db_name, &ctx.schema_fetcher).await
     } else if tool_name == db_query::MEVDB_TOOL_NAME {
         db_query::execute_mevdb_query_tool(arguments).await
     } else if tool_name == db_query::GLOBALDB_TOOL_NAME {
@@ -169,7 +142,7 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
 // this is the core loop that handles sequences of api calls if tools are involved.
 #[instrument(skip_all)]
 pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
-    ctx: &super::HandlerContext<'_, D, B>,
+    ctx: &super::HandlerContext<D, B>,
     mut api_response: OpenAiApiResponse,
     mut conversation_history: Vec<InputItem>,
     available_tools: Vec<ApiToolType>,
@@ -285,7 +258,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
 
             match openai_api::call_responses_api(
                 ctx.http_client.clone(),
-                ctx.openai_api_key,
+                &ctx.openai_api_key,
                 conversation_history.clone(),
                 next_api_args,
             )
@@ -394,7 +367,7 @@ pub(crate) fn determine_turn_tools(
 }
 
 pub async fn start_ai_processing_loop<D: Db, B: BeaconNode>(
-    ctx: &super::HandlerContext<'_, D, B>,
+    ctx: &super::HandlerContext<D, B>,
     initial_api_response: OpenAiApiResponse,
     initial_input_items: Vec<InputItem>,
     current_model_id: String,

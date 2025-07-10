@@ -7,7 +7,6 @@
 
 use crate::db::Db;
 use anyhow::{Context, Result};
-use reqwest::Client as ReqwestClient;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
@@ -16,25 +15,12 @@ use crate::telegram::types::{ApiResponse, Update};
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
-pub async fn run_bot_loop(
-    db: impl Db + Clone,
-    bot_token: String,
-    openai_api_key: String,
-    bot_db_id: i32,
-) -> Result<()> {
+pub async fn run_bot_loop<D: Db + Clone>(bot_ctx: BotContext<D>) -> Result<()> {
+    let bot_token = bot_ctx.bot_token.clone();
+    let bot_db_id = bot_ctx.bot_db_id;
+
     let mut last_update_id = 0;
     info!(bot_db_id, "bot loop started. listening for updates...");
-
-    let telegram_http_client = ReqwestClient::new();
-
-    let bot_ctx = BotContext {
-        db,
-        http_client: telegram_http_client.clone(),
-        api_base_url: TELEGRAM_API_URL,
-        bot_token: &bot_token,
-        bot_db_id,
-        openai_api_key: &openai_api_key,
-    };
 
     loop {
         let get_updates_url = format!(
@@ -46,7 +32,8 @@ pub async fn run_bot_loop(
 
         debug!("requesting updates: {}", get_updates_url);
 
-        let response = telegram_http_client
+        let response = bot_ctx
+            .http_client
             .get(&get_updates_url)
             .send()
             .await
