@@ -5,7 +5,13 @@ use std::{env, sync::LazyLock};
 
 use tracing::{debug, warn};
 
-const LOG_BLACKLIST: [&str; 1] = ["DATABASE_URL"];
+const LOG_BLACKLIST: [&str; 5] = [
+    "BOT_ADMIN_CODE",
+    "DATABASE_URL",
+    "GLOBALDB_DATABASE_URL",
+    "MEVDB_DATABASE_URL",
+    "RELAY_ADMIN_TOKEN",
+];
 
 pub static ENV_CONFIG: LazyLock<EnvConfig> = LazyLock::new(get_env_config);
 
