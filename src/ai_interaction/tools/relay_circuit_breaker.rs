@@ -79,7 +79,6 @@ impl RelayCircuitBreaker {
             "{}/ultrasound/v1/admin/{relative_path}?token={}&enable={}",
             self.base_url, self.admin_token, enabled
         );
-        // let request_body = json!({ "enabled": enabled });
 
         info!(url = %request_url, "sending circuit breaker state request");
 
