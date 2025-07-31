@@ -195,7 +195,7 @@ where
             json!({
                 "status": "error",
                 "message": format!("{} sql query execution timed out.", tool_name),
-                "details": format!("The query took longer than {} seconds to execute and was cancelled to prevent the system from hanging indefinitely.", timeout_duration.as_secs())
+                "details": format!("the query took longer than {} seconds to execute and was cancelled to prevent the system from hanging indefinitely.", timeout_duration.as_secs())
             })
         }
     }
