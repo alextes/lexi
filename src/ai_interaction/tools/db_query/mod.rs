@@ -145,6 +145,7 @@ pub async fn execute_db_query_common<'c, E>(
 where
     E: Executor<'c, Database = sqlx::Postgres>,
 {
+    const MAX_ROWS: usize = 256;
     info!("attempting to execute db query using provided executor");
 
     // wrap the query in a 1 minute future timeout to avoid hanging indefinitely on a db lock
@@ -157,11 +158,22 @@ where
             Ok(rows) => {
                 if rows.is_empty() {
                     return json!({
-                        "message": format!("{} query executed successfully. no rows returned.", tool_name)
+                        "status": "success",
+                        "message": format!("{} query executed successfully. no rows returned.", tool_name),
+                        "results": []
                     });
                 }
+
+                let total_rows = rows.len();
+                let truncated = total_rows > MAX_ROWS;
+                let rows_to_process = if truncated {
+                    &rows[0..MAX_ROWS]
+                } else {
+                    &rows[..]
+                };
+
                 let mut results: Vec<JsonMap<String, JsonValue>> = Vec::new();
-                for (row_idx, row) in rows.iter().enumerate() {
+                for (row_idx, row) in rows_to_process.iter().enumerate() {
                     let mut json_row = JsonMap::new();
                     for (col_idx, column) in row.columns().iter().enumerate() {
                         let column_name = column.name().to_string();
@@ -176,7 +188,27 @@ where
                     }
                     results.push(json_row);
                 }
-                json!(results)
+
+                let mut response = json!({
+                    "status": "success",
+                    "results": results
+                });
+
+                if truncated {
+                    let message = format!(
+                        "query returned {total_rows} rows, but the result was truncated to the first {MAX_ROWS} rows."
+                    );
+                    info!(
+                        total_rows = total_rows,
+                        max_rows = MAX_ROWS,
+                        "query result truncated"
+                    );
+                    if let Some(obj) = response.as_object_mut() {
+                        obj.insert("message".to_string(), json!(message));
+                    }
+                }
+
+                response
             }
             Err(e) => {
                 error!(error = %e, "failed to execute sql query");
@@ -282,9 +314,15 @@ mod tests {
             ),
         ];
 
-        let arr = result_json_value.as_array().ok_or_else(|| {
-            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
-        })?;
+        let arr = result_json_value
+            .get("results")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "result was not a json array in the 'results' field. got: {:?}",
+                    result_json_value
+                )
+            })?;
         anyhow::ensure!(
             arr.len() == expected_rows_data.len(),
             "array length mismatch. expected {}, got: {}. array: {:?}",
@@ -444,9 +482,15 @@ mod tests {
             execute_db_query_common(&pool, select_data_query, "test_enum").await;
 
         // 5. verify results
-        let arr = result_json_value.as_array().ok_or_else(|| {
-            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
-        })?;
+        let arr = result_json_value
+            .get("results")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "result was not a json array in the 'results' field. got: {:?}",
+                    result_json_value
+                )
+            })?;
         assert_eq!(
             arr.len(),
             4,
@@ -518,9 +562,15 @@ mod tests {
             execute_db_query_common(&pool, select_data_query, "test_text_array").await;
 
         // 4. verify results
-        let arr = result_json_value.as_array().ok_or_else(|| {
-            anyhow::anyhow!("result was not a json array. got: {:?}", result_json_value)
-        })?;
+        let arr = result_json_value
+            .get("results")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "result was not a json array in the 'results' field. got: {:?}",
+                    result_json_value
+                )
+            })?;
         assert_eq!(arr.len(), 4);
 
         // row 0: {rust,postgres,sqlx}
@@ -546,6 +596,36 @@ mod tests {
             "row 3 tags mismatch. got: {:?}",
             row3.get("tags")
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_row_limit_truncation(pool: PgPool) -> Result<()> {
+        // 1. create table
+        sqlx::query("CREATE TABLE test_truncation (id INT);")
+            .execute(&pool)
+            .await?;
+
+        // 2. insert 300 rows
+        for i in 0..300 {
+            sqlx::query("INSERT INTO test_truncation (id) VALUES ($1);")
+                .bind(i)
+                .execute(&pool)
+                .await?;
+        }
+
+        // 3. select data
+        let select_all_query = "SELECT id FROM test_truncation ORDER BY id;";
+        let result_json = execute_db_query_common(&pool, select_all_query, "test_truncation").await;
+
+        // 4. verify truncation
+        let result_obj = result_json.as_object().unwrap();
+        let results_arr = result_obj.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results_arr.len(), 256);
+
+        let message = result_obj.get("message").unwrap().as_str().unwrap();
+        assert!(message.contains("truncated to the first 256 rows"));
 
         Ok(())
     }
