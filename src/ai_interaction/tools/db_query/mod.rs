@@ -147,11 +147,12 @@ where
 {
     info!("attempting to execute db query using provided executor");
 
-    // Wrap the query execution with a 1-minute timeout
+    // wrap the query in a 1 minute future timeout to avoid hanging indefinitely on a db lock
     let query_future = sqlx::query(query).fetch_all(executor);
-    let timeout_duration = Duration::from_secs(60); // 1 minute timeout
+    let timeout_duration = Duration::from_secs(60);
+    let timeout_result = tokio::time::timeout(timeout_duration, query_future).await;
 
-    match tokio::time::timeout(timeout_duration, query_future).await {
+    match timeout_result {
         Ok(query_result) => match query_result {
             Ok(rows) => {
                 if rows.is_empty() {
