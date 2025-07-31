@@ -20,6 +20,7 @@ use sqlx::{
     types::BigDecimal,
     Column, Executor, Row, ValueRef,
 };
+use std::time::Duration;
 use tracing::instrument;
 use tracing::{error, info};
 
@@ -146,37 +147,54 @@ where
 {
     info!("attempting to execute db query using provided executor");
 
-    match sqlx::query(query).fetch_all(executor).await {
-        Ok(rows) => {
-            if rows.is_empty() {
-                return json!({
-                    "message": format!("{} query executed successfully. no rows returned.", tool_name)
-                });
-            }
-            let mut results: Vec<JsonMap<String, JsonValue>> = Vec::new();
-            for (row_idx, row) in rows.iter().enumerate() {
-                let mut json_row = JsonMap::new();
-                for (col_idx, column) in row.columns().iter().enumerate() {
-                    let column_name = column.name().to_string();
-                    match convert_db_value_to_json(row, col_idx, column, row_idx) {
-                        Ok(json_value) => {
-                            json_row.insert(column_name, json_value);
-                        }
-                        Err(err_json) => {
-                            return err_json;
+    // Wrap the query execution with a 1-minute timeout
+    let query_future = sqlx::query(query).fetch_all(executor);
+    let timeout_duration = Duration::from_secs(60); // 1 minute timeout
+
+    match tokio::time::timeout(timeout_duration, query_future).await {
+        Ok(query_result) => match query_result {
+            Ok(rows) => {
+                if rows.is_empty() {
+                    return json!({
+                        "message": format!("{} query executed successfully. no rows returned.", tool_name)
+                    });
+                }
+                let mut results: Vec<JsonMap<String, JsonValue>> = Vec::new();
+                for (row_idx, row) in rows.iter().enumerate() {
+                    let mut json_row = JsonMap::new();
+                    for (col_idx, column) in row.columns().iter().enumerate() {
+                        let column_name = column.name().to_string();
+                        match convert_db_value_to_json(row, col_idx, column, row_idx) {
+                            Ok(json_value) => {
+                                json_row.insert(column_name, json_value);
+                            }
+                            Err(err_json) => {
+                                return err_json;
+                            }
                         }
                     }
+                    results.push(json_row);
                 }
-                results.push(json_row);
+                json!(results)
             }
-            json!(results)
-        }
-        Err(e) => {
-            error!(error = %e, "failed to execute sql query");
+            Err(e) => {
+                error!(error = %e, "failed to execute sql query");
+                json!({
+                    "status": "error",
+                    "message": format!("failed to execute {} sql query.", tool_name),
+                    "details": e.to_string()
+                })
+            }
+        },
+        Err(_) => {
+            error!(
+                "sql query execution timed out after {} seconds",
+                timeout_duration.as_secs()
+            );
             json!({
                 "status": "error",
-                "message": format!("failed to execute {} sql query.", tool_name),
-                "details": e.to_string()
+                "message": format!("{} sql query execution timed out.", tool_name),
+                "details": format!("The query took longer than {} seconds to execute and was cancelled to prevent the system from hanging indefinitely.", timeout_duration.as_secs())
             })
         }
     }
