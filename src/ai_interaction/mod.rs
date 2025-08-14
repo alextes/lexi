@@ -20,7 +20,7 @@ use crate::openai_api::{
     call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
 };
 use openai_chat::DEFAULT_OPENAI_MODEL_ID;
-use openai_chat::OPENAI_CALL_CONFIG; // import the default model ID // Added import for ENV_CONFIG
+use openai_chat::OPENAI_CALL_CONFIG;
 
 // added imports for global model id store
 use std::sync::LazyLock;

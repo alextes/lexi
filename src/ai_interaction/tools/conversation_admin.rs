@@ -14,21 +14,15 @@ const SET_OPENAI_MODEL_COMMAND_NAME: &str = "set_openai_model";
 const ADMIN_CODE_PARAM_NAME: &str = "admin_code";
 const MODEL_ID_PARAM_NAME: &str = "model_id";
 
-const GPT_4_1_MODEL_ID: &str = "gpt-4.1";
-const O4_MINI_MODEL_ID: &str = "o4-mini";
-const O3_MODEL_ID: &str = "o3";
+const GPT_5_MODEL_ID: &str = "gpt-5";
+const GPT_5_MINI_MODEL_ID: &str = "gpt-5-mini";
 
 // For enum_string in tool definition
-static ALLOWED_MODEL_IDS_FOR_TOOL_DEF: &[&str] = &[GPT_4_1_MODEL_ID, O4_MINI_MODEL_ID, O3_MODEL_ID];
+static ALLOWED_MODEL_IDS_FOR_TOOL_DEF: &[&str] = &[GPT_5_MODEL_ID, GPT_5_MINI_MODEL_ID];
 
 // For runtime checking
-static ALLOWED_MODEL_IDS_VEC: LazyLock<Vec<String>> = LazyLock::new(|| {
-    vec![
-        GPT_4_1_MODEL_ID.to_string(),
-        O4_MINI_MODEL_ID.to_string(),
-        O3_MODEL_ID.to_string(),
-    ]
-});
+static ALLOWED_MODEL_IDS_VEC: LazyLock<Vec<String>> =
+    LazyLock::new(|| vec![GPT_5_MODEL_ID.to_string(), GPT_5_MINI_MODEL_ID.to_string()]);
 
 static EXPECTED_ADMIN_CODE: LazyLock<String> = LazyLock::new(|| {
     ENV_CONFIG
@@ -326,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_model_success() {
         let admin_code = get_expected_admin_code();
-        let model_id = O4_MINI_MODEL_ID;
+        let model_id = GPT_5_MINI_MODEL_ID;
         let args = json!({
             "command": SET_OPENAI_MODEL_COMMAND_NAME,
             ADMIN_CODE_PARAM_NAME: admin_code,
@@ -363,15 +357,11 @@ mod tests {
         assert!(result_json["details"]
             .as_str()
             .unwrap()
-            .contains(GPT_4_1_MODEL_ID));
+            .contains(GPT_5_MODEL_ID));
         assert!(result_json["details"]
             .as_str()
             .unwrap()
-            .contains(O4_MINI_MODEL_ID));
-        assert!(result_json["details"]
-            .as_str()
-            .unwrap()
-            .contains(O3_MODEL_ID));
+            .contains(GPT_5_MINI_MODEL_ID));
     }
 
     #[tokio::test]
@@ -403,7 +393,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_model_invalid_admin_code() {
-        let model_id = O3_MODEL_ID;
+        let model_id = GPT_5_MODEL_ID;
         let args = json!({
             "command": SET_OPENAI_MODEL_COMMAND_NAME,
             ADMIN_CODE_PARAM_NAME: "wrong_admin_code",

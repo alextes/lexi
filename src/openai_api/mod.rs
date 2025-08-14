@@ -117,7 +117,7 @@ mod tests {
 
         let http_client = ReqwestClient::new();
         let current_user_input = "tell me a three sentence bedtime story about a unicorn.";
-        let model_id_val = "gpt-4.1";
+        let model_id_val = "gpt-5";
 
         let input_items_val = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
@@ -145,24 +145,22 @@ mod tests {
                 println!("parsed response: {parsed_response:#?}");
                 assert_eq!(parsed_response.object, "response");
                 assert!(!parsed_response.output.is_empty());
-                match parsed_response.output.first().unwrap() {
-                    OutputItem::Message(msg) => {
-                        assert_eq!(msg.role, "assistant");
-                        assert!(!msg.content.is_empty());
-                        let first_text_content = msg.content.first().unwrap();
-                        assert_eq!(first_text_content.r#type, "output_text");
-                        assert!(!first_text_content.text.is_empty());
-                        println!("assistant reply: {}", first_text_content.text);
-                    }
-                    OutputItem::FunctionCall(fc) => {
-                        panic!("expected a message output, but got a function call: {fc:?}");
-                    }
-                    OutputItem::Reasoning(reasoning) => {
-                        panic!("expected a message output, but got a reasoning: {reasoning:?}");
-                    }
-                    OutputItem::WebSearchCall(ws) => {
-                        panic!("expected a message output, but got a web search call: {ws:?}");
-                    }
+                // tolerate an initial reasoning item; find the first message item
+                if let Some(OutputItem::Message(msg)) = parsed_response
+                    .output
+                    .iter()
+                    .find(|item| matches!(item, OutputItem::Message(_)))
+                {
+                    assert_eq!(msg.role, "assistant");
+                    assert!(!msg.content.is_empty());
+                    let first_text_content = msg.content.first().unwrap();
+                    assert_eq!(first_text_content.r#type, "output_text");
+                    assert!(!first_text_content.text.is_empty());
+                    println!("assistant reply: {}", first_text_content.text);
+                } else {
+                    panic!(
+                        "expected a message output, but none was found in response output items"
+                    );
                 }
             }
             Err(e) => {
@@ -188,7 +186,7 @@ mod tests {
             return;
         };
         let http_client = ReqwestClient::new();
-        let model_id_val = "gpt-4.1";
+        let model_id_val = "gpt-5";
 
         let mut params_props = HashMap::new();
         params_props.insert(
@@ -250,18 +248,15 @@ mod tests {
             !initial_response.output.is_empty(),
             "initial response output is empty"
         );
-        let function_call_item = match initial_response.output.first().unwrap() {
-            OutputItem::FunctionCall(fc) => fc,
-            OutputItem::Message(msg) => {
-                panic!("expected a function call, got a message: {msg:?}")
-            }
-            OutputItem::Reasoning(reasoning) => {
-                panic!("expected a message output, but got a reasoning: {reasoning:?}");
-            }
-            OutputItem::WebSearchCall(ws) => {
-                panic!("expected a function call, but got a web search call: {ws:?}");
-            }
-        };
+        // tolerate an initial reasoning item; find the first function call
+        let function_call_item = initial_response
+            .output
+            .iter()
+            .find_map(|item| match item {
+                OutputItem::FunctionCall(fc) => Some(fc),
+                _ => None,
+            })
+            .expect("expected a function call in the output items, but none was found");
 
         assert_eq!(function_call_item.name, "execute_sql_query");
         println!(
@@ -332,29 +327,27 @@ mod tests {
             !final_response.output.is_empty(),
             "final response output is empty"
         );
-        match final_response.output.first().unwrap() {
-            OutputItem::Message(msg) => {
-                assert_eq!(msg.role, "assistant");
-                assert!(!msg.content.is_empty());
-                let text_content = msg.content.first().unwrap();
-                println!(
-                    "function call test: step 2 - final assistant reply: {}",
-                    text_content.text
-                );
-                assert!(text_content
-                    .text
-                    .to_lowercase()
-                    .contains("alpha@simpletest.com"));
-            }
-            OutputItem::FunctionCall(fc) => {
-                panic!("expected a final message, but got another function call: {fc:?}");
-            }
-            OutputItem::Reasoning(reasoning) => {
-                panic!("expected a message output, but got a reasoning: {reasoning:?}");
-            }
-            OutputItem::WebSearchCall(ws) => {
-                panic!("expected a message output, but got a web search call: {ws:?}");
-            }
+        // tolerate a leading reasoning item; find the first assistant message
+        if let Some(OutputItem::Message(msg)) = final_response
+            .output
+            .iter()
+            .find(|item| matches!(item, OutputItem::Message(_)))
+        {
+            assert_eq!(msg.role, "assistant");
+            assert!(!msg.content.is_empty());
+            let text_content = msg.content.first().unwrap();
+            println!(
+                "function call test: step 2 - final assistant reply: {}",
+                text_content.text
+            );
+            assert!(text_content
+                .text
+                .to_lowercase()
+                .contains("alpha@simpletest.com"));
+        } else {
+            panic!(
+                "expected a final assistant message, but none was found in response output items"
+            );
         }
     }
 }
