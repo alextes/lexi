@@ -13,24 +13,67 @@ pub async fn call_responses_api<'a>(
     input_items: Vec<InputItem>,
     args: CallResponsesApiOptionalArgs<'a>,
 ) -> Result<OpenAiApiResponse> {
-    let request_payload = serde_json::json!({
-        "input": input_items,
-        "model": args.model_id,
-        "previous_response_id": args.previous_response_id,
-        "tools": args.tools,
-        "tool_choice": args.tool_choice,
-        "instructions": args.instructions,
-        "temperature": args.temperature,
-        "store": args.store,
-    });
+    // build request payload without including null fields, and respecting
+    // current api placement for verbosity (under text.verbosity) and reasoning
+    // (under top-level reasoning.effort)
+    let mut root = serde_json::Map::new();
+    root.insert("input".to_string(), serde_json::to_value(&input_items)?);
+    root.insert("model".to_string(), serde_json::to_value(args.model_id)?);
+
+    if let Some(prev_id) = args.previous_response_id {
+        root.insert(
+            "previous_response_id".to_string(),
+            serde_json::to_value(prev_id)?,
+        );
+    }
+    if let Some(ref tools) = args.tools {
+        root.insert("tools".to_string(), serde_json::to_value(tools)?);
+    }
+    if let Some(tool_choice) = args.tool_choice {
+        root.insert(
+            "tool_choice".to_string(),
+            serde_json::to_value(tool_choice)?,
+        );
+    }
+    if let Some(instructions) = args.instructions {
+        root.insert(
+            "instructions".to_string(),
+            serde_json::to_value(instructions)?,
+        );
+    }
+    if let Some(temperature) = args.temperature {
+        root.insert(
+            "temperature".to_string(),
+            serde_json::to_value(temperature)?,
+        );
+    }
+    if let Some(store) = args.store {
+        root.insert("store".to_string(), serde_json::to_value(store)?);
+    }
+    if let Some(verbosity) = args.verbosity {
+        let mut text_obj = serde_json::Map::new();
+        text_obj.insert("verbosity".to_string(), serde_json::to_value(verbosity)?);
+        root.insert("text".to_string(), serde_json::Value::Object(text_obj));
+    }
+    if let Some(effort) = args.reasoning_effort {
+        let mut reasoning_obj = serde_json::Map::new();
+        reasoning_obj.insert("effort".to_string(), serde_json::to_value(effort)?);
+        root.insert(
+            "reasoning".to_string(),
+            serde_json::Value::Object(reasoning_obj),
+        );
+    }
+
+    let request_payload = serde_json::Value::Object(root);
 
     let endpoint_url = OPENAI_RESPONSES_API_URL;
+    let tools_count_val = args.tools.as_ref().map_or(0, std::vec::Vec::len);
     info!(
         url = %endpoint_url,
         model = %args.model_id,
         previous_id = ?args.previous_response_id,
         input_items_count = input_items.len(),
-        tools_count = args.tools.as_ref().map_or(0, std::vec::Vec::len),
+        tools_count = tools_count_val,
         "attempting to call openai {} endpoint", "/v1/responses"
     );
 
@@ -132,6 +175,8 @@ mod tests {
             instructions: None,
             temperature: None,
             store: None,
+            verbosity: None,
+            reasoning_effort: None,
         };
 
         println!("attempting test call to call_responses_api with 'input' parameter...");
@@ -225,6 +270,8 @@ mod tests {
             instructions: Some(initial_instruction_text),
             temperature: None,
             store: None,
+            verbosity: None,
+            reasoning_effort: None,
         };
 
         println!("function call test: step 1 - requesting tool use...");
@@ -304,6 +351,8 @@ mod tests {
             instructions: Some(initial_instruction_text),
             temperature: None,
             store: None,
+            verbosity: None,
+            reasoning_effort: None,
         };
 
         println!("function call test: step 2 - sending function result...");

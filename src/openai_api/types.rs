@@ -21,6 +21,9 @@ pub struct CallResponsesApiOptionalArgs<'a> {
     pub instructions: Option<&'a str>,
     pub temperature: Option<f64>,
     pub store: Option<bool>,
+    // new optional knobs exposed by the responses api
+    pub verbosity: Option<&'a str>, // e.g. "low" | "medium" | "high"
+    pub reasoning_effort: Option<&'a str>, // e.g. "low" | "medium" | "high"
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -112,6 +115,7 @@ impl ToolDefinition {
     ) -> Self {
         let mut updated_parameters = parameters;
         if let Some(ref mut params) = updated_parameters {
+            // for strict tools, required must include every key in properties per api docs
             let required_param_names: Vec<String> = params.properties.keys().cloned().collect();
             params.required = Some(required_param_names);
             params.additional_properties = false;
@@ -263,4 +267,42 @@ pub struct OpenAiApiResponse {
     pub usage: Option<JsonValue>,
     pub user: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_definition_new_sets_required_to_all_keys_for_strict() {
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "a".to_string(),
+            ToolFunctionParameterPropertyBuilder::new_string().build(),
+        );
+        props.insert(
+            "b".to_string(),
+            ToolFunctionParameterPropertyBuilder::integer().build(),
+        );
+        let params = ToolFunctionParameters {
+            r#type: "object".to_string(),
+            properties: props.clone(),
+            required: Some(vec!["a".to_string()]), // intentionally incomplete
+            additional_properties: true,           // will be overridden
+        };
+
+        let def = ToolDefinition::new("t".to_string(), Some("d".to_string()), Some(params));
+
+        assert_eq!(def.r#type, "function");
+        assert_eq!(def.strict, Some(true));
+        let built_params = def.parameters.expect("parameters expected");
+        assert_eq!(built_params.r#type, "object");
+        // required must be all keys, not just ["a"]
+        let mut expected: Vec<String> = props.keys().cloned().collect();
+        expected.sort();
+        let mut actual = built_params.required.unwrap();
+        actual.sort();
+        assert_eq!(actual, expected);
+        assert!(!built_params.additional_properties);
+    }
 }

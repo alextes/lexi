@@ -45,6 +45,41 @@ pub async fn set_current_model_id(new_model_id: String) {
 }
 // end global model id store
 
+// global verbosity and reasoning effort stores
+pub static GLOBAL_VERBOSITY: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+pub static GLOBAL_REASONING_EFFORT: LazyLock<RwLock<Option<String>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+pub async fn get_current_verbosity() -> Option<String> {
+    GLOBAL_VERBOSITY.read().await.clone()
+}
+
+pub async fn set_current_verbosity(new_verbosity: Option<String>) {
+    let mut guard = GLOBAL_VERBOSITY.write().await;
+    *guard = new_verbosity.clone();
+    if let Some(v) = new_verbosity {
+        tracing::info!(new_global_verbosity = %v, "global openai verbosity updated by admin tool");
+    } else {
+        tracing::info!("global openai verbosity cleared by admin tool");
+    }
+}
+
+pub async fn get_current_reasoning_effort() -> Option<String> {
+    GLOBAL_REASONING_EFFORT.read().await.clone()
+}
+
+pub async fn set_current_reasoning_effort(new_effort: Option<String>) {
+    let mut guard = GLOBAL_REASONING_EFFORT.write().await;
+    *guard = new_effort.clone();
+    if let Some(e) = new_effort {
+        tracing::info!(new_global_reasoning_effort = %e, "global openai reasoning effort updated by admin tool");
+    } else {
+        tracing::info!("global openai reasoning effort cleared by admin tool");
+    }
+}
+// end global verbosity and reasoning effort stores
+
 /// represents the outcome of an ai conversation cycle.
 pub enum AiConversationOutcome {
     /// the ai returned a text message.
@@ -56,6 +91,12 @@ pub enum AiConversationOutcome {
     /// the ai (or a tool called by the ai) requested the openai model to be changed for future turns.
     /// contains (confirmation_message_for_user, response_id_triggering_change, new_model_id).
     ChangeModel(String, String, String),
+    /// the ai (or a tool) requested the verbosity to be changed for future turns.
+    /// contains (confirmation_message_for_user, response_id_triggering_change, new_verbosity).
+    ChangeVerbosity(String, String, String),
+    /// the ai (or a tool) requested the reasoning effort to be changed for future turns.
+    /// contains (confirmation_message_for_user, response_id_triggering_change, new_reasoning_effort).
+    ChangeReasoningEffort(String, String, String),
 }
 
 pub struct HandlerContext<D: Db, B: BeaconNode> {
@@ -96,6 +137,9 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
         current_model_id,
     );
 
+    let current_verbosity_owned = get_current_verbosity().await;
+    let current_reasoning_effort_owned = get_current_reasoning_effort().await;
+
     let initial_api_args = CallResponsesApiOptionalArgs {
         model_id: current_model_id,
         previous_response_id,
@@ -104,6 +148,8 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
         instructions: Some(&OPENAI_CALL_CONFIG.instructions),
         temperature: None,
         store: Some(true),
+        verbosity: current_verbosity_owned.as_deref(),
+        reasoning_effort: current_reasoning_effort_owned.as_deref(),
     };
 
     match call_responses_api(
@@ -159,6 +205,26 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
                         "openai model change to '{new_model_id}' requested by ai/tool. confirmation: \"{message}\""
                     ),
                     response_id, // return original response_id that triggered change
+                ))
+            }
+            AiConversationOutcome::ChangeVerbosity(message, response_id, new_verbosity) => {
+                info!(response_id = %response_id, %new_verbosity, "openai verbosity change requested by ai/tool.");
+                set_current_verbosity(Some(new_verbosity.clone())).await;
+                Ok((
+                    format!(
+                        "openai verbosity change to '{new_verbosity}' requested by ai/tool. confirmation: \"{message}\""
+                    ),
+                    response_id,
+                ))
+            }
+            AiConversationOutcome::ChangeReasoningEffort(message, response_id, new_effort) => {
+                info!(response_id = %response_id, %new_effort, "openai reasoning effort change requested by ai/tool.");
+                set_current_reasoning_effort(Some(new_effort.clone())).await;
+                Ok((
+                    format!(
+                        "openai reasoning effort change to '{new_effort}' requested by ai/tool. confirmation: \"{message}\""
+                    ),
+                    response_id,
                 ))
             }
         },

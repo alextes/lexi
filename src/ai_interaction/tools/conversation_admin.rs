@@ -11,14 +11,24 @@ use tracing::{info, instrument, warn};
 pub const CONVERSATION_ADMIN_TOOL_NAME: &str = "conversation_admin_tool";
 const RESET_CONVERSATION_COMMAND_NAME: &str = "reset_conversation";
 const SET_OPENAI_MODEL_COMMAND_NAME: &str = "set_openai_model";
+const SET_VERBOSITY_COMMAND_NAME: &str = "set_verbosity";
+const SET_REASONING_EFFORT_COMMAND_NAME: &str = "set_reasoning_effort";
 const ADMIN_CODE_PARAM_NAME: &str = "admin_code";
 const MODEL_ID_PARAM_NAME: &str = "model_id";
+const VERBOSITY_PARAM_NAME: &str = "verbosity";
+const REASONING_EFFORT_PARAM_NAME: &str = "reasoning_effort";
 
 const GPT_5_MODEL_ID: &str = "gpt-5";
 const GPT_5_MINI_MODEL_ID: &str = "gpt-5-mini";
 
 // For enum_string in tool definition
 static ALLOWED_MODEL_IDS_FOR_TOOL_DEF: &[&str] = &[GPT_5_MODEL_ID, GPT_5_MINI_MODEL_ID];
+
+// verbosity and reasoning effort allowed values
+const LOW: &str = "low";
+const MEDIUM: &str = "medium";
+const HIGH: &str = "high";
+static ALLOWED_LEVELS_FOR_TOOL_DEF: &[&str] = &[LOW, MEDIUM, HIGH];
 
 // For runtime checking
 static ALLOWED_MODEL_IDS_VEC: LazyLock<Vec<String>> =
@@ -37,11 +47,13 @@ pub static CONVERSATION_ADMIN_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| 
         "command".to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "the command to execute. can be 'reset_conversation' or 'set_openai_model'.",
+                "the command to execute. can be 'reset_conversation', 'set_openai_model', 'set_verbosity', or 'set_reasoning_effort'.",
             )
             .enum_string(&[
                 RESET_CONVERSATION_COMMAND_NAME,
                 SET_OPENAI_MODEL_COMMAND_NAME,
+                SET_VERBOSITY_COMMAND_NAME,
+                SET_REASONING_EFFORT_COMMAND_NAME,
             ])
             .build(),
     );
@@ -60,6 +72,24 @@ pub static CONVERSATION_ADMIN_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| 
                 "the identifier of the openai model to use. required if command is 'set_openai_model'.",
             )
             .enum_string(ALLOWED_MODEL_IDS_FOR_TOOL_DEF)
+            .build(),
+    );
+    params_props.insert(
+        VERBOSITY_PARAM_NAME.to_string(),
+        ToolFunctionParameterPropertyBuilder::new_string()
+            .description(
+                "the verbosity level to use for future responses. required if command is 'set_verbosity'. allowed: low, medium, high.",
+            )
+            .enum_string(ALLOWED_LEVELS_FOR_TOOL_DEF)
+            .build(),
+    );
+    params_props.insert(
+        REASONING_EFFORT_PARAM_NAME.to_string(),
+        ToolFunctionParameterPropertyBuilder::new_string()
+            .description(
+                "the reasoning effort level to use for future responses. required if command is 'set_reasoning_effort'. allowed: low, medium, high.",
+            )
+            .enum_string(ALLOWED_LEVELS_FOR_TOOL_DEF)
             .build(),
     );
 
@@ -160,9 +190,93 @@ pub async fn execute_conversation_admin_command(arguments_json_str: &str) -> Res
                         })
                         .to_string())
                     }
+                } else if cmd == SET_VERBOSITY_COMMAND_NAME {
+                    info!(command = %cmd, "admin command validated, proceeding with set_verbosity.");
+                    if let Some(level_val) = args_map.get(VERBOSITY_PARAM_NAME) {
+                        if [LOW.to_string(), MEDIUM.to_string(), HIGH.to_string()]
+                            .contains(level_val)
+                        {
+                            info!(verbosity = %level_val, "verbosity will be set for future responses.");
+                            Ok(json!({
+                                "status": "success",
+                                "action": "verbosity_updated",
+                                "new_verbosity": level_val,
+                                "message": format!("verbosity for future responses set to '{}'.", level_val)
+                            }).to_string())
+                        } else {
+                            let err_msg = format!(
+                                "invalid '{}': '{}' for command '{}'. allowed values are: {:?}",
+                                VERBOSITY_PARAM_NAME,
+                                level_val,
+                                SET_VERBOSITY_COMMAND_NAME,
+                                [LOW, MEDIUM, HIGH]
+                            );
+                            warn!(args = %arguments_json_str, error = %err_msg);
+                            Ok(json!({
+                                "status": "error",
+                                "message": "invalid_parameter_value",
+                                "details": err_msg
+                            })
+                            .to_string())
+                        }
+                    } else {
+                        let err_msg = format!(
+                            "missing required argument: '{}' for command '{}'",
+                            VERBOSITY_PARAM_NAME, SET_VERBOSITY_COMMAND_NAME
+                        );
+                        warn!(args = %arguments_json_str, error = %err_msg);
+                        Ok(json!({
+                            "status": "error",
+                            "message": "missing_required_argument_for_command",
+                            "details": err_msg,
+                        })
+                        .to_string())
+                    }
+                } else if cmd == SET_REASONING_EFFORT_COMMAND_NAME {
+                    info!(command = %cmd, "admin command validated, proceeding with set_reasoning_effort.");
+                    if let Some(level_val) = args_map.get(REASONING_EFFORT_PARAM_NAME) {
+                        if [LOW.to_string(), MEDIUM.to_string(), HIGH.to_string()]
+                            .contains(level_val)
+                        {
+                            info!(reasoning_effort = %level_val, "reasoning effort will be set for future responses.");
+                            Ok(json!({
+                                "status": "success",
+                                "action": "reasoning_effort_updated",
+                                "new_reasoning_effort": level_val,
+                                "message": format!("reasoning effort for future responses set to '{}'.", level_val)
+                            }).to_string())
+                        } else {
+                            let err_msg = format!(
+                                "invalid '{}': '{}' for command '{}'. allowed values are: {:?}",
+                                REASONING_EFFORT_PARAM_NAME,
+                                level_val,
+                                SET_REASONING_EFFORT_COMMAND_NAME,
+                                [LOW, MEDIUM, HIGH]
+                            );
+                            warn!(args = %arguments_json_str, error = %err_msg);
+                            Ok(json!({
+                                "status": "error",
+                                "message": "invalid_parameter_value",
+                                "details": err_msg
+                            })
+                            .to_string())
+                        }
+                    } else {
+                        let err_msg = format!(
+                            "missing required argument: '{}' for command '{}'",
+                            REASONING_EFFORT_PARAM_NAME, SET_REASONING_EFFORT_COMMAND_NAME
+                        );
+                        warn!(args = %arguments_json_str, error = %err_msg);
+                        Ok(json!({
+                            "status": "error",
+                            "message": "missing_required_argument_for_command",
+                            "details": err_msg,
+                        })
+                        .to_string())
+                    }
                 } else {
                     let err_msg = format!(
-                        "invalid command '{cmd}' specified. supported commands are: '{RESET_CONVERSATION_COMMAND_NAME}', '{SET_OPENAI_MODEL_COMMAND_NAME}'."
+                        "invalid command '{cmd}' specified. supported commands are: '{RESET_CONVERSATION_COMMAND_NAME}', '{SET_OPENAI_MODEL_COMMAND_NAME}', '{SET_VERBOSITY_COMMAND_NAME}', '{SET_REASONING_EFFORT_COMMAND_NAME}'."
                     );
                     warn!(args = %arguments_json_str, error = %err_msg);
                     Ok(json!({ "status": "error", "message": err_msg }).to_string())
@@ -406,5 +520,32 @@ mod tests {
 
         assert_eq!(result_json["status"], "error");
         assert_eq!(result_json["message"], "invalid admin_code provided.");
+    }
+
+    #[test]
+    fn test_admin_tool_schema_required_includes_all_properties() {
+        // this ensures our function tool definition stays compliant with strict schema requirements
+        let tool = &*CONVERSATION_ADMIN_TOOL;
+        assert_eq!(tool.r#type, "function");
+        assert_eq!(tool.strict, Some(true));
+        let params = tool
+            .parameters
+            .as_ref()
+            .expect("parameters must be present");
+        assert_eq!(params.r#type, "object");
+        assert!(!params.additional_properties);
+
+        // required must include every key in properties for strict tools
+        let mut prop_keys: Vec<String> = params.properties.keys().cloned().collect();
+        prop_keys.sort();
+        let mut required_keys = params
+            .required
+            .clone()
+            .expect("required must be set for strict tools");
+        required_keys.sort();
+        assert_eq!(
+            required_keys, prop_keys,
+            "required must list all property keys"
+        );
     }
 }

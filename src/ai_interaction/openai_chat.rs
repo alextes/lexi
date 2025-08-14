@@ -208,6 +208,35 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                                         ));
                                     }
                                 }
+                                if json_val.get("action").and_then(|v| v.as_str())
+                                    == Some("verbosity_updated")
+                                {
+                                    if let Some(new_verbosity) =
+                                        json_val.get("new_verbosity").and_then(|v| v.as_str())
+                                    {
+                                        info!(response_id = %current_response_id, new_verbosity = %new_verbosity, "openai verbosity update triggered by admin tool.");
+                                        return Ok(AiConversationOutcome::ChangeVerbosity(
+                                            tool_output_json_string,
+                                            current_response_id,
+                                            new_verbosity.to_string(),
+                                        ));
+                                    }
+                                }
+                                if json_val.get("action").and_then(|v| v.as_str())
+                                    == Some("reasoning_effort_updated")
+                                {
+                                    if let Some(new_effort) = json_val
+                                        .get("new_reasoning_effort")
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        info!(response_id = %current_response_id, new_reasoning_effort = %new_effort, "openai reasoning effort update triggered by admin tool.");
+                                        return Ok(AiConversationOutcome::ChangeReasoningEffort(
+                                            tool_output_json_string,
+                                            current_response_id,
+                                            new_effort.to_string(),
+                                        ));
+                                    }
+                                }
                             }
                         }
                         conversation_history.push(InputItem::FunctionCallOutput(
@@ -241,6 +270,10 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                 response_id = %current_response_id,
                 "sending updated conversation history to api (after tool results)"
             );
+            // fetch current knobs for follow-up calls
+            let current_verbosity_owned = super::get_current_verbosity().await;
+            let current_reasoning_effort_owned = super::get_current_reasoning_effort().await;
+
             let next_api_args = CallResponsesApiOptionalArgs {
                 model_id: &current_model_id,
                 previous_response_id: Some(&current_response_id),
@@ -253,6 +286,8 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                 },
                 temperature: None,
                 store: Some(true),
+                verbosity: current_verbosity_owned.as_deref(),
+                reasoning_effort: current_reasoning_effort_owned.as_deref(),
             };
             first_iteration = false;
 

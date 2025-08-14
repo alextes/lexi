@@ -392,6 +392,78 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             .await
                             .context("failed to send model change confirmation message")?;
                         }
+                        AiConversationOutcome::ChangeVerbosity(
+                            confirmation_json_str,
+                            _response_id,
+                            new_verbosity,
+                        ) => {
+                            info!(chat_id = incoming_message.chat.id, %new_verbosity, "openai verbosity change requested by admin tool. updating global verbosity.");
+                            ai_interaction::set_current_verbosity(Some(new_verbosity.clone())).await;
+                            let final_message_to_send = match serde_json::from_str::<Value>(
+                                &confirmation_json_str,
+                            ) {
+                                Ok(json_val) => {
+                                    if let Some(msg_content) =
+                                        json_val.get("message").and_then(|v| v.as_str())
+                                    {
+                                        format!("system message: {msg_content}")
+                                    } else {
+                                        warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "changeverbosity json did not contain a 'message' field. sending raw json.");
+                                        confirmation_json_str.to_string()
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(chat_id = incoming_message.chat.id, error = %e, raw_payload = %confirmation_json_str, "failed to parse changeverbosity json. sending raw string.");
+                                    confirmation_json_str.to_string()
+                                }
+                            };
+
+                            telegram::send_message(
+                                &ctx.http_client,
+                                ctx.api_base_url.as_str(),
+                                ctx.bot_token.as_str(),
+                                incoming_message.chat.id,
+                                &final_message_to_send,
+                            )
+                            .await
+                            .context("failed to send verbosity change confirmation message")?;
+                        }
+                        AiConversationOutcome::ChangeReasoningEffort(
+                            confirmation_json_str,
+                            _response_id,
+                            new_effort,
+                        ) => {
+                            info!(chat_id = incoming_message.chat.id, %new_effort, "openai reasoning effort change requested by admin tool. updating global reasoning effort.");
+                            ai_interaction::set_current_reasoning_effort(Some(new_effort.clone())).await;
+                            let final_message_to_send = match serde_json::from_str::<Value>(
+                                &confirmation_json_str,
+                            ) {
+                                Ok(json_val) => {
+                                    if let Some(msg_content) =
+                                        json_val.get("message").and_then(|v| v.as_str())
+                                    {
+                                        format!("system message: {msg_content}")
+                                    } else {
+                                        warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "changereasoningeffort json did not contain a 'message' field. sending raw json.");
+                                        confirmation_json_str.to_string()
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(chat_id = incoming_message.chat.id, error = %e, raw_payload = %confirmation_json_str, "failed to parse changereasoningeffort json. sending raw string.");
+                                    confirmation_json_str.to_string()
+                                }
+                            };
+
+                            telegram::send_message(
+                                &ctx.http_client,
+                                ctx.api_base_url.as_str(),
+                                ctx.bot_token.as_str(),
+                                incoming_message.chat.id,
+                                &final_message_to_send,
+                            )
+                            .await
+                            .context("failed to send reasoning effort change confirmation message")?;
+                        }
                     },
                     Err(e) => {
                         error!(chat_id = incoming_message.chat.id, error = %e, "error from drive_ai_conversation");
