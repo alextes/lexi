@@ -18,7 +18,7 @@ use lexi::bot::BotContext;
 use reqwest::Client as ReqwestClient;
 use std::env;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 use lexi::bot::r#loop::{run_bot_loop, TELEGRAM_API_URL};
 use lexi::db::{self, Db};
@@ -95,6 +95,42 @@ async fn main() -> Result<()> {
             .clone()
             .expect("RELAY_URL is required in env config."),
     );
+
+    // start a lightweight healthcheck server if configured
+    if let Some(port) = ENV_CONFIG.port {
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            use tokio::net::TcpListener;
+
+            let addr = format!("0.0.0.0:{port}");
+            match TcpListener::bind(&addr).await {
+                Ok(listener) => {
+                    info!(port, "healthcheck server listening");
+                    loop {
+                        match listener.accept().await {
+                            Ok((mut socket, _peer)) => {
+                                // minimal http 200 response
+                                let _ = socket
+                                    .write_all(
+                                        b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nok",
+                                    )
+                                    .await;
+                                let _ = socket.shutdown().await;
+                            }
+                            Err(e) => {
+                                warn!(error = ?e, "healthcheck accept failed");
+                                // brief yield to avoid tight error loop
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(error = ?e, port, "failed to bind healthcheck server");
+                }
+            }
+        });
+    }
 
     let bot_ctx = BotContext {
         db: db_conn,

@@ -80,6 +80,8 @@ pub struct EnvConfig {
     pub relay_admin_token: Option<String>,
     /// url of the relay api e.g. https://relay.ultrasound.money
     pub relay_url: Option<String>,
+    /// optional port to run a simple healthcheck http server on
+    pub port: Option<u16>,
 }
 
 #[must_use]
@@ -94,6 +96,7 @@ pub fn get_env_config() -> EnvConfig {
         mevdb_database_url: get_env_var("MEVDB_DATABASE_URL"),
         relay_admin_token: get_env_var("RELAY_ADMIN_TOKEN"),
         relay_url: get_env_var("RELAY_URL"),
+        port: get_env_var("PORT").and_then(|s| s.parse::<u16>().ok()),
     }
 }
 

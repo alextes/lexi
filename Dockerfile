@@ -79,5 +79,5 @@ USER appuser
 CMD ["./run_tg_bot"]
 
 # expose any ports the application listens on.
-# for many bots, this is not needed as they connect outwards.
-# expose 8080 
+# optional healthcheck server (set PORT to enable). default 8080.
+EXPOSE 8080
