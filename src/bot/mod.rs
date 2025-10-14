@@ -398,7 +398,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             new_verbosity,
                         ) => {
                             info!(chat_id = incoming_message.chat.id, %new_verbosity, "openai verbosity change requested by admin tool. updating global verbosity.");
-                            ai_interaction::set_current_verbosity(Some(new_verbosity.clone())).await;
+                            ai_interaction::set_current_verbosity(Some(new_verbosity.clone()))
+                                .await;
                             let final_message_to_send = match serde_json::from_str::<Value>(
                                 &confirmation_json_str,
                             ) {
@@ -434,7 +435,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             new_effort,
                         ) => {
                             info!(chat_id = incoming_message.chat.id, %new_effort, "openai reasoning effort change requested by admin tool. updating global reasoning effort.");
-                            ai_interaction::set_current_reasoning_effort(Some(new_effort.clone())).await;
+                            ai_interaction::set_current_reasoning_effort(Some(new_effort.clone()))
+                                .await;
                             let final_message_to_send = match serde_json::from_str::<Value>(
                                 &confirmation_json_str,
                             ) {
@@ -462,7 +464,9 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 &final_message_to_send,
                             )
                             .await
-                            .context("failed to send reasoning effort change confirmation message")?;
+                            .context(
+                                "failed to send reasoning effort change confirmation message",
+                            )?;
                         }
                     },
                     Err(e) => {
