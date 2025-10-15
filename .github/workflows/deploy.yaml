@@ -1,0 +1,19 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: deploy to server
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.LEXI_HOST }}
+          username: ${{ secrets.LEXI_USER }}
+          key: ${{ secrets.LEXI_SSH_KEY }}
+          script: |
+            /home/ubuntu/lexi/scripts/deploy.sh
