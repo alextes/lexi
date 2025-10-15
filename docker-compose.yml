@@ -1,4 +1,15 @@
 services:
+  lexi:
+    build:
+      context: .
+    container_name: lexi_bot
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://postgres:password@postgres:5432/lexi
+    depends_on:
+      - postgres
+    restart: unless-stopped
   postgres:
     image: postgres:16
     container_name: lexi_psql
@@ -13,4 +24,4 @@ services:
 
 volumes:
   psql_data:
-    driver: local 
+    driver: local
