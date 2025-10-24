@@ -22,7 +22,7 @@ use sqlx::{
 };
 use std::time::Duration;
 use tracing::instrument;
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 // helper function for parsing enum values
 fn try_parse_enum_value_as_json(
@@ -147,6 +147,10 @@ where
 {
     const MAX_ROWS: usize = 256;
     info!("attempting to execute db query using provided executor");
+    debug!(
+        query_len = query.len(),
+        tool_name, "db query length in characters"
+    );
 
     // wrap the query in a 1 minute future timeout to avoid hanging indefinitely on a db lock
     let query_future = sqlx::query(query).fetch_all(executor);
@@ -211,7 +215,7 @@ where
                 response
             }
             Err(e) => {
-                error!(error = %e, "failed to execute sql query");
+                error!(error = %e, tool_name, "failed to execute sql query");
                 json!({
                     "status": "error",
                     "message": format!("failed to execute {} sql query.", tool_name),
@@ -220,9 +224,10 @@ where
             }
         },
         Err(_) => {
-            error!(
-                "sql query execution timed out after {} seconds",
-                timeout_duration.as_secs()
+            warn!(
+                tool_name,
+                timeout_secs = timeout_duration.as_secs(),
+                "sql query execution timed out"
             );
             json!({
                 "status": "error",

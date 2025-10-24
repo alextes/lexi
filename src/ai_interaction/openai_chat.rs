@@ -268,6 +268,8 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
             // now, call the api again with the accumulated history including tool results.
             debug!(
                 response_id = %current_response_id,
+                convo_items = conversation_history.len(),
+                tools_available = available_tools.len(),
                 "sending updated conversation history to api (after tool results)"
             );
             // fetch current knobs for follow-up calls
@@ -303,13 +305,22 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                     api_response = next_api_response;
                 }
                 Err(e) => {
-                    error!(response_id = %current_response_id, error= %e, "api call after tool results failed.");
+                    error!(
+                        response_id = %current_response_id,
+                        error = %e,
+                        convo_items = conversation_history.len(),
+                        "api call after tool results failed."
+                    );
                     return Err(anyhow::anyhow!("api call after tool results failed: {}", e));
                 }
             }
         } else if let Some(final_text) = assistant_text_content_this_turn {
             // Use the text we parsed earlier if it exists and no tool calls were made.
-            info!(response_id = %current_response_id, "received final assistant message");
+            info!(
+                response_id = %current_response_id,
+                convo_items = conversation_history.len(),
+                "received final assistant message"
+            );
             debug!(
                 response_id = %current_response_id,
                 "final conversation history state"
