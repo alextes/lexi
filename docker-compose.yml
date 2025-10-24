@@ -6,22 +6,23 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgres://postgres:password@postgres:5441/lexi
+      DATABASE_URL: postgres://postgres:password@postgres:5432/lexi
     depends_on:
       - postgres
     restart: unless-stopped
   postgres:
-    image: postgres:16
+    image: postgres:17
     container_name: lexi_psql
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: lexi
     ports:
-      - "5441:5441"
+      - "5441:5432"
     volumes:
       - psql_data:/var/lib/postgresql/data
 
 volumes:
   psql_data:
+    name: lexi_psql_data_17
     driver: local
