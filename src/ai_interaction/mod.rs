@@ -110,12 +110,16 @@ pub struct HandlerContext<D: Db, B: BeaconNode> {
 }
 
 #[instrument(skip(ctx, prompt_text, previous_response_id))]
-pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
+pub async fn drive_ai_conversation<D, B>(
     ctx: &HandlerContext<D, B>,
     prompt_text: &str,
     previous_response_id: Option<&str>,
     current_model_id: &str,
-) -> Result<AiConversationOutcome> {
+) -> Result<AiConversationOutcome>
+where
+    D: Db + Send + Sync + 'static,
+    B: BeaconNode + Send + Sync + 'static,
+{
     info!(
         // logging_id field is now part of the span
         prompt = prompt_text,
@@ -170,8 +174,15 @@ pub async fn drive_ai_conversation<D: Db, B: BeaconNode>(
         .await
         .context("core ai conversation processing loop failed"),
         Err(e) => {
-            error!(error = %e, "initial /v1/responses api call failed");
-            Err(e)
+            // log both display and debug forms so the full error chain is visible
+            // (including transport-level issues from reqwest) while preserving it
+            // in the returned error.
+            error!(
+                error = %e,
+                error_debug = ?e,
+                "initial /v1/responses api call failed"
+            );
+            Err(anyhow::Error::from(e).context("initial /v1/responses api call failed"))
         }
     }
 }

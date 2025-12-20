@@ -305,13 +305,16 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                     api_response = next_api_response;
                 }
                 Err(e) => {
+                    // include debug formatting so the full anyhow error chain (including
+                    // underlying reqwest details) is visible in logs.
                     error!(
                         response_id = %current_response_id,
                         error = %e,
+                        error_debug = ?e,
                         convo_items = conversation_history.len(),
                         "api call after tool results failed."
                     );
-                    return Err(anyhow::anyhow!("api call after tool results failed: {}", e));
+                    return Err(Err(e).context("api call after tool results failed").unwrap_err());
                 }
             }
         } else if let Some(final_text) = assistant_text_content_this_turn {

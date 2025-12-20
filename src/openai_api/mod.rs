@@ -84,7 +84,25 @@ pub async fn call_responses_api<'a>(
         .json(&request_payload)
         .send()
         .await
-        .context("failed to send request to openai api")?;
+        .map_err(|e| {
+            // log richer details about the underlying transport error so callers
+            // (and logs) can distinguish between timeouts, dns/connect issues, etc.
+            let is_timeout = e.is_timeout();
+            let is_connect = e.is_connect();
+            let is_request = e.is_request();
+            let is_body = e.is_body();
+            error!(
+                url = %endpoint_url,
+                error = %e,
+                error_debug = ?e,
+                is_timeout,
+                is_connect,
+                is_request,
+                is_body,
+                "failed to send request to openai api"
+            );
+            anyhow!(e).context("failed to send request to openai api")
+        })?;
 
     let response_status = response.status();
     let response_text = response
