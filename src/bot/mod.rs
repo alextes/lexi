@@ -16,7 +16,8 @@ pub mod r#loop;
 use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::db_schema::LiveSchemaFetcher;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
-use crate::ai_interaction::{self, AiConversationOutcome};
+use crate::ai_interaction::{self, admin_session, AiConversationOutcome};
+use crate::env::ENV_CONFIG;
 use crate::db::Db;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
@@ -96,6 +97,32 @@ pub fn log_other_mentions(message: &TelegramMessage) {
                     );
                 }
             }
+        }
+    }
+}
+
+fn strip_admin_code(prompt_text: &str, bot_admin_code: Option<&str>) -> (bool, String) {
+    let Some(expected_admin_code) = bot_admin_code else {
+        return (false, prompt_text.to_string());
+    };
+
+    let admin_trigger_phrase = format!("admin code {expected_admin_code}");
+    if prompt_text.contains(&admin_trigger_phrase) {
+        let cleaned = prompt_text.replace(&admin_trigger_phrase, "");
+        let normalized = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+        (true, normalized)
+    } else {
+        (false, prompt_text.to_string())
+    }
+}
+
+async fn admin_session_is_active<D: Db>(db: &D, local_chat_id: i32) -> bool {
+    match admin_session::get_admin_session_state(db, local_chat_id).await {
+        Ok(Some(state)) => state.active,
+        Ok(None) => false,
+        Err(e) => {
+            warn!(local_chat_id, error = %e, "failed to read admin session state");
+            false
         }
     }
 }
@@ -243,7 +270,37 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 )
             };
 
-            if prompt_text.is_empty() && incoming_message.text.is_some() {
+            let previous_response_id_opt_string = match ctx
+                .db
+                .get_last_openai_response_id(local_chat_id_for_conversation)
+                .await
+            {
+                Ok(id_opt) => id_opt,
+                Err(e) => {
+                    warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
+                    None
+                }
+            };
+
+            let (admin_code_detected, sanitized_prompt) =
+                strip_admin_code(&prompt_text, ENV_CONFIG.bot_admin_code.as_deref());
+            let mut admin_session_active =
+                admin_session_is_active(&ctx.db, local_chat_id_for_conversation).await;
+            if !admin_session_active && admin_code_detected {
+                if let Err(e) = admin_session::start_admin_session(
+                    &ctx.db,
+                    local_chat_id_for_conversation,
+                    previous_response_id_opt_string.clone(),
+                )
+                .await
+                {
+                    warn!(chat_id = incoming_message.chat.id, error = %e, "failed to start admin session");
+                } else {
+                    admin_session_active = true;
+                }
+            }
+
+            if sanitized_prompt.is_empty() && incoming_message.text.is_some() {
                 info!(
                     chat_id = incoming_message.chat.id,
                     "prompt is empty after processing, sending generic acknowledgement."
@@ -261,19 +318,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 )
                 .await
                 .context("failed to send/store acknowledgement for empty prompt")?;
-            } else if !prompt_text.is_empty() {
-                let previous_response_id_opt_string = match ctx
-                    .db
-                    .get_last_openai_response_id(local_chat_id_for_conversation)
-                    .await
-                {
-                    Ok(id_opt) => id_opt,
-                    Err(e) => {
-                        warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
-                        None
-                    }
-                };
-
+            } else if !sanitized_prompt.is_empty() {
                 let current_model_id_for_ai_call = ai_interaction::get_current_model_id().await;
 
                 let mp_ctx = ai_interaction::HandlerContext {
@@ -288,9 +333,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
                 match ai_interaction::drive_ai_conversation(
                     &mp_ctx,
-                    &prompt_text,
+                    &sanitized_prompt,
                     previous_response_id_opt_string.as_deref(),
                     &current_model_id_for_ai_call,
+                    admin_session_active,
                 )
                 .await
                 {

@@ -15,7 +15,6 @@ use anyhow::{Context, Result};
 use reqwest::Client as ReqwestClient;
 use tracing::{error, info, instrument};
 
-use crate::env::ENV_CONFIG;
 use crate::openai_api::{
     call_responses_api, CallResponsesApiOptionalArgs, InputItem, InputMessageObject,
 };
@@ -116,6 +115,7 @@ pub async fn drive_ai_conversation<D, B>(
     prompt_text: &str,
     previous_response_id: Option<&str>,
     current_model_id: &str,
+    admin_session_active: bool,
 ) -> Result<AiConversationOutcome>
 where
     D: Db,
@@ -136,9 +136,8 @@ where
 
     // determine tools *before* the first API call
     let turn_specific_tools = openai_chat::determine_turn_tools(
-        &input_items,
         &OPENAI_CALL_CONFIG.available_tools,
-        ENV_CONFIG.bot_admin_code.as_deref(),
+        admin_session_active,
         current_model_id,
     );
 
@@ -197,7 +196,14 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
         prompt = prompt_text,
         "processing single prompt via core ai driver"
     );
-    match drive_ai_conversation(ctx, prompt_text, None, DEFAULT_OPENAI_MODEL_ID).await {
+    match drive_ai_conversation(
+        ctx,
+        prompt_text,
+        None,
+        DEFAULT_OPENAI_MODEL_ID,
+        false,
+    )
+    .await {
         Ok(outcome) => match outcome {
             AiConversationOutcome::TextMessage(message, response_id) => Ok((message, response_id)),
             AiConversationOutcome::ResetConversation(message, response_id) => {
