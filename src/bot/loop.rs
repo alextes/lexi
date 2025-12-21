@@ -15,9 +15,7 @@ use crate::telegram::types::{ApiResponse, Update};
 
 pub const TELEGRAM_API_URL: &str = "https://api.telegram.org/bot";
 
-pub async fn run_bot_loop<D: Db + Clone + Send + Sync + 'static>(
-    bot_ctx: BotContext<D>,
-) -> Result<()> {
+pub async fn run_bot_loop<D: Db + Clone>(bot_ctx: BotContext<D>) -> Result<()> {
     let bot_token = bot_ctx.bot_token.clone();
     let bot_db_id = bot_ctx.bot_db_id;
 

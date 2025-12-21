@@ -5,7 +5,7 @@ use sqlx::PgPool;
 
 #[allow(async_fn_in_trait)]
 pub trait KeyValueStore {
-    async fn set<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()>;
+    async fn set<T: Serialize>(&self, key: &str, value: &T) -> Result<()>;
     async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<(T, DateTime<Utc>)>>;
 }
 
@@ -21,7 +21,7 @@ impl PostgresKeyValueStore {
 }
 
 impl KeyValueStore for PostgresKeyValueStore {
-    async fn set<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()> {
+    async fn set<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
         let json_value = serde_json::to_value(value)
             .with_context(|| format!("failed to serialize value for key: {key}"))?;
 

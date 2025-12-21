@@ -171,7 +171,7 @@ pub async fn send_reply_and_update_state<D: Db>(
     Ok(())
 }
 
-pub async fn handle_telegram_update<D: Db + Clone + Send + Sync + 'static>(
+pub async fn handle_telegram_update<D: Db + Clone>(
     ctx: &BotContext<D>,
     update: &TelegramUpdate,
 ) -> Result<()> {

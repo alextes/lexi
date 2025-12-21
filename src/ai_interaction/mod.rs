@@ -118,8 +118,8 @@ pub async fn drive_ai_conversation<D, B>(
     current_model_id: &str,
 ) -> Result<AiConversationOutcome>
 where
-    D: Db + Send + Sync + 'static,
-    B: BeaconNode + Send + Sync + 'static,
+    D: Db,
+    B: BeaconNode,
 {
     info!(
         // logging_id field is now part of the span
@@ -183,13 +183,13 @@ where
                 error_debug = ?e,
                 "initial /v1/responses api call failed"
             );
-            Err(anyhow::Error::from(e).context("initial /v1/responses api call failed"))
+            Err(e.context("initial /v1/responses api call failed"))
         }
     }
 }
 
 #[instrument(skip(ctx, prompt_text))]
-pub async fn process_single_prompt_for_cli<D: Db + Send + Sync + 'static, B: BeaconNode + Send + Sync + 'static>(
+pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
     ctx: &HandlerContext<D, B>,
     prompt_text: &str,
 ) -> Result<(String, String)> {

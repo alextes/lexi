@@ -34,12 +34,10 @@ pub trait Db {
         response_id: &str,
     ) -> Result<()>;
     async fn clear_last_openai_response_id(&self, local_chat_id: i32) -> Result<()>;
-    async fn set_kv<T: Serialize + Send + Sync + 'static>(
-        &self,
-        key: &str,
-        value: &T,
-    ) -> Result<()>;
-    async fn get_kv<T: DeserializeOwned + Send + 'static>(
+    // NOTE: 'static keeps mockall expectations sound (mock storage is 'static).
+    async fn set_kv<T: Serialize + 'static>(&self, key: &str, value: &T) -> Result<()>;
+    // NOTE: 'static keeps mockall expectations sound (mock storage is 'static).
+    async fn get_kv<T: DeserializeOwned + 'static>(
         &self,
         key: &str,
     ) -> Result<Option<(T, DateTime<Utc>)>>;
@@ -286,11 +284,14 @@ impl Db for PostgresDb {
         Ok(())
     }
 
-    async fn set_kv<T: Serialize + Send + Sync>(&self, key: &str, value: &T) -> Result<()> {
+    async fn set_kv<T: Serialize + 'static>(&self, key: &str, value: &T) -> Result<()> {
         self.key_value_store.set(key, value).await
     }
 
-    async fn get_kv<T: DeserializeOwned>(&self, key: &str) -> Result<Option<(T, DateTime<Utc>)>> {
+    async fn get_kv<T: DeserializeOwned + 'static>(
+        &self,
+        key: &str,
+    ) -> Result<Option<(T, DateTime<Utc>)>> {
         self.key_value_store.get(key).await
     }
 }
