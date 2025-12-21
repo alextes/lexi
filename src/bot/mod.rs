@@ -12,6 +12,7 @@
 //! - maintaining conversation context by storing relevant openai response ids in the database.
 
 pub mod r#loop;
+mod proactive;
 
 use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::db_schema::LiveSchemaFetcher;
@@ -171,7 +172,7 @@ pub async fn send_reply_and_update_state<D: Db>(
     Ok(())
 }
 
-pub async fn handle_telegram_update<D: Db + Clone>(
+pub async fn handle_telegram_update<D: Db + Clone + Send + Sync + 'static>(
     ctx: &BotContext<D>,
     update: &TelegramUpdate,
 ) -> Result<()> {
@@ -229,6 +230,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
             local_db_chat_id = local_chat_id_for_conversation,
             "successfully inserted incoming message"
         );
+
+        if let Some(txt) = &incoming_message.text {
+            proactive::maybe_schedule_proactive_slot_check(ctx, incoming_message.chat.id, txt);
+        }
 
         let should_trigger_ai_reply = incoming_message.chat.chat_type == "private"
             || mentions_bot(&incoming_message.text, &incoming_message.entities);

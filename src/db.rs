@@ -12,7 +12,7 @@ use crate::telegram::types::{
 
 #[allow(async_fn_in_trait)]
 #[automock]
-pub trait Db {
+pub trait Db: Send + Sync {
     async fn upsert_user(&self, user_data: &TelegramUser) -> Result<i32>;
     async fn upsert_chat(&self, chat_data: &TelegramChat) -> Result<i32>;
     async fn insert_message(

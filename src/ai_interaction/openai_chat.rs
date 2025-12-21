@@ -314,7 +314,7 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                         convo_items = conversation_history.len(),
                         "api call after tool results failed."
                     );
-                    return Err(Err(e).context("api call after tool results failed").unwrap_err());
+                    return Err(e.context("api call after tool results failed"));
                 }
             }
         } else if let Some(final_text) = assistant_text_content_this_turn {

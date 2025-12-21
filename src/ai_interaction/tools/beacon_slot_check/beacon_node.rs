@@ -5,7 +5,7 @@ use tracing::{error, info, instrument};
 
 #[allow(async_fn_in_trait)]
 #[automock]
-pub trait BeaconNode {
+pub trait BeaconNode: Send + Sync {
     async fn slot_status(&self, slot: u64) -> Result<StatusCode>;
 }
 
