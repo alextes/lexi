@@ -514,6 +514,86 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 "failed to send reasoning effort change confirmation message",
                             )?;
                         }
+                        AiConversationOutcome::EndAdminSession(
+                            confirmation_json_str,
+                            _response_id,
+                        ) => {
+                            let final_message_to_send = match serde_json::from_str::<Value>(
+                                &confirmation_json_str,
+                            ) {
+                                Ok(json_val) => {
+                                    if let Some(msg_content) =
+                                        json_val.get("message").and_then(|v| v.as_str())
+                                    {
+                                        format!("system message: {msg_content}")
+                                    } else {
+                                        warn!(chat_id = incoming_message.chat.id, json_payload = %confirmation_json_str, "end admin session json did not contain a 'message' field. sending raw json.");
+                                        confirmation_json_str.to_string()
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(chat_id = incoming_message.chat.id, error = %e, raw_payload = %confirmation_json_str, "failed to parse end admin session json. sending raw string.");
+                                    confirmation_json_str.to_string()
+                                }
+                            };
+
+                            if let Ok(state_opt) =
+                                admin_session::get_admin_session_state(
+                                    &ctx.db,
+                                    local_chat_id_for_conversation,
+                                )
+                                .await
+                            {
+                                if let Some(state) = state_opt {
+                                    match state.last_response_id_before_admin.as_deref() {
+                                        Some(resp_id) => {
+                                            if let Err(e) = ctx
+                                                .db
+                                                .update_last_openai_response_id(
+                                                    local_chat_id_for_conversation,
+                                                    resp_id,
+                                                )
+                                                .await
+                                            {
+                                                warn!(chat_id = incoming_message.chat.id, response_id = resp_id, error = %e, "failed to restore last_openai_response_id after admin session end.");
+                                            }
+                                        }
+                                        None => {
+                                            if let Err(e) = ctx
+                                                .db
+                                                .clear_last_openai_response_id(
+                                                    local_chat_id_for_conversation,
+                                                )
+                                                .await
+                                            {
+                                                warn!(chat_id = incoming_message.chat.id, error = %e, "failed to clear last_openai_response_id after admin session end.");
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!(chat_id = incoming_message.chat.id, "failed to read admin session state for end admin session.");
+                            }
+
+                            if let Err(e) = admin_session::end_admin_session(
+                                &ctx.db,
+                                local_chat_id_for_conversation,
+                            )
+                            .await
+                            {
+                                warn!(chat_id = incoming_message.chat.id, error = %e, "failed to clear admin session state after end.");
+                            }
+
+                            telegram::send_message(
+                                &ctx.http_client,
+                                ctx.api_base_url.as_str(),
+                                ctx.bot_token.as_str(),
+                                incoming_message.chat.id,
+                                &final_message_to_send,
+                            )
+                            .await
+                            .context("failed to send admin session end confirmation message")?;
+                        }
                     },
                     Err(e) => {
                         error!(chat_id = incoming_message.chat.id, error = %e, "error from drive_ai_conversation");

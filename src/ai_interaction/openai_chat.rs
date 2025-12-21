@@ -34,6 +34,7 @@ pub struct OpenAiCallConfig {
 
 pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
     let available_tools = vec![
+        ApiToolType::Function(tools::admin_session_end::ADMIN_SESSION_END_TOOL.clone()),
         ApiToolType::Function(tools::beacon_slot_check::BEACON_SLOT_CHECK_TOOL.clone()),
         ApiToolType::Function(tools::db_schema::DATABASE_SCHEMA_TOOL.clone()),
         ApiToolType::Function(tools::db_query::MEVDB_QUERY_TOOL.clone()),
@@ -120,6 +121,8 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
         db_query::execute_mevdb_query_tool(arguments).await
     } else if tool_name == db_query::GLOBALDB_TOOL_NAME {
         db_query::execute_globaldb_query_tool(arguments).await
+    } else if tool_name == admin_session_end::ADMIN_SESSION_END_TOOL_NAME {
+        admin_session_end::execute_admin_session_end_tool(arguments).await
     } else if tool_name == conversation_admin::CONVERSATION_ADMIN_TOOL_NAME {
         conversation_admin::execute_conversation_admin_command(arguments).await
     } else if tool_name == retrieve_manual::RETRIEVE_MANUAL_TOOL_NAME {
@@ -181,6 +184,8 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                     Ok(tool_output_json_string) => {
                         if fc_request.name
                             == super::tools::conversation_admin::CONVERSATION_ADMIN_TOOL_NAME
+                            || fc_request.name
+                                == super::tools::admin_session_end::ADMIN_SESSION_END_TOOL_NAME
                         {
                             if let Ok(json_val) =
                                 serde_json::from_str::<JsonValue>(&tool_output_json_string)
@@ -236,6 +241,15 @@ pub(super) async fn process_openai_response_loop<D: Db, B: BeaconNode>(
                                             new_effort.to_string(),
                                         ));
                                     }
+                                }
+                                if json_val.get("action").and_then(|v| v.as_str())
+                                    == Some("end_admin_session")
+                                {
+                                    info!(response_id = %current_response_id, "admin session end triggered by tool.");
+                                    return Ok(AiConversationOutcome::EndAdminSession(
+                                        tool_output_json_string,
+                                        current_response_id,
+                                    ));
                                 }
                             }
                         }

@@ -97,6 +97,9 @@ pub enum AiConversationOutcome {
     /// the ai (or a tool) requested the reasoning effort to be changed for future turns.
     /// contains (confirmation_message_for_user, response_id_triggering_change, new_reasoning_effort).
     ChangeReasoningEffort(String, String, String),
+    /// the ai (or a tool) requested the admin session to end.
+    /// contains (confirmation_message_for_user, response_id_triggering_end).
+    EndAdminSession(String, String),
 }
 
 pub struct HandlerContext<D: Db, B: BeaconNode> {
@@ -245,6 +248,10 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
                     response_id,
                 ))
             }
+            AiConversationOutcome::EndAdminSession(message, response_id) => Ok((
+                format!("admin session end requested by ai/tool. confirmation: \"{message}\""),
+                response_id,
+            )),
         },
         Err(e) => Err(e),
     }
