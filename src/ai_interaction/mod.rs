@@ -28,6 +28,7 @@ use tokio::sync::RwLock;
 // end added imports
 
 pub mod openai_chat;
+pub mod admin_session;
 pub mod tools;
 
 // global model id store
@@ -188,7 +189,7 @@ where
 }
 
 #[instrument(skip(ctx, prompt_text))]
-pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
+pub async fn process_single_prompt_for_cli<D: Db + Send + Sync + 'static, B: BeaconNode + Send + Sync + 'static>(
     ctx: &HandlerContext<D, B>,
     prompt_text: &str,
 ) -> Result<(String, String)> {
