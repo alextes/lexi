@@ -143,15 +143,11 @@ mod tests {
 
         mock_db
             .expect_set_kv::<AdminSessionState>()
-            .withf(move |k, v| {
-                k == key && !v.active && v.started_at.is_none()
-            })
+            .withf(move |k, v| k == key && !v.active && v.started_at.is_none())
             .times(1)
             .returning(|_, _| Ok(()));
 
-        let state = end_admin_session(&mock_db, local_chat_id)
-            .await
-            .unwrap();
+        let state = end_admin_session(&mock_db, local_chat_id).await.unwrap();
 
         assert!(!state.active);
         assert!(state.started_at.is_none());

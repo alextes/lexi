@@ -17,8 +17,8 @@ use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::db_schema::LiveSchemaFetcher;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use crate::ai_interaction::{self, admin_session, AiConversationOutcome};
-use crate::env::ENV_CONFIG;
 use crate::db::Db;
+use crate::env::ENV_CONFIG;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use anyhow::{Context, Result};
@@ -537,12 +537,11 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 }
                             };
 
-                            if let Ok(state_opt) =
-                                admin_session::get_admin_session_state(
-                                    &ctx.db,
-                                    local_chat_id_for_conversation,
-                                )
-                                .await
+                            if let Ok(state_opt) = admin_session::get_admin_session_state(
+                                &ctx.db,
+                                local_chat_id_for_conversation,
+                            )
+                            .await
                             {
                                 if let Some(state) = state_opt {
                                     match state.last_response_id_before_admin.as_deref() {
@@ -572,7 +571,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     }
                                 }
                             } else {
-                                warn!(chat_id = incoming_message.chat.id, "failed to read admin session state for end admin session.");
+                                warn!(
+                                    chat_id = incoming_message.chat.id,
+                                    "failed to read admin session state for end admin session."
+                                );
                             }
 
                             if let Err(e) = admin_session::end_admin_session(

@@ -26,8 +26,8 @@ use std::sync::LazyLock;
 use tokio::sync::RwLock;
 // end added imports
 
-pub mod openai_chat;
 pub mod admin_session;
+pub mod openai_chat;
 pub mod tools;
 
 // global model id store
@@ -199,14 +199,7 @@ pub async fn process_single_prompt_for_cli<D: Db, B: BeaconNode>(
         prompt = prompt_text,
         "processing single prompt via core ai driver"
     );
-    match drive_ai_conversation(
-        ctx,
-        prompt_text,
-        None,
-        DEFAULT_OPENAI_MODEL_ID,
-        false,
-    )
-    .await {
+    match drive_ai_conversation(ctx, prompt_text, None, DEFAULT_OPENAI_MODEL_ID, false).await {
         Ok(outcome) => match outcome {
             AiConversationOutcome::TextMessage(message, response_id) => Ok((message, response_id)),
             AiConversationOutcome::ResetConversation(message, response_id) => {
