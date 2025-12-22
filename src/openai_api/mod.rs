@@ -178,7 +178,7 @@ mod tests {
 
         let http_client = ReqwestClient::new();
         let current_user_input = "tell me a three sentence bedtime story about a unicorn.";
-        let model_id_val = "gpt-5";
+        let model_id_val = "gpt-5.2";
 
         let input_items_val = vec![InputItem::Message(InputMessageObject {
             role: "user".to_string(),
@@ -249,7 +249,7 @@ mod tests {
             return;
         };
         let http_client = ReqwestClient::new();
-        let model_id_val = "gpt-5";
+        let model_id_val = "gpt-5.2";
 
         let mut params_props = HashMap::new();
         params_props.insert(

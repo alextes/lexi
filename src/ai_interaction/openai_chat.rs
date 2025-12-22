@@ -22,7 +22,7 @@ use tracing::{debug, error, info, instrument, warn};
 // add these imports
 use crate::ai_interaction::tools;
 
-pub const DEFAULT_OPENAI_MODEL_ID: &str = "gpt-5";
+pub const DEFAULT_OPENAI_MODEL_ID: &str = "gpt-5.2";
 
 use std::sync::LazyLock;
 
@@ -373,7 +373,7 @@ pub(crate) fn determine_turn_tools(
         turn_specific_available_tools.retain(|tool| !tools::is_admin_only_tool(tool));
     }
 
-    // support websearch for gpt-5 and gpt-5-mini; remove for others
+    // support websearch for gpt-5.2 and gpt-5-mini; remove for others
     let websearch_supported =
         current_model_id == DEFAULT_OPENAI_MODEL_ID || current_model_id == "gpt-5-mini";
     if websearch_supported {
@@ -419,7 +419,7 @@ mod tests {
         ToolDefinition, WebSearchToolConfig,
     };
 
-    const TEST_GPT_5_MODEL_ID: &str = "gpt-5";
+    const TEST_GPT_5_MODEL_ID: &str = "gpt-5.2";
     const TEST_GPT_5_MINI_MODEL_ID: &str = "gpt-5-mini";
 
     #[test]

@@ -18,7 +18,7 @@ const MODEL_ID_PARAM_NAME: &str = "model_id";
 const VERBOSITY_PARAM_NAME: &str = "verbosity";
 const REASONING_EFFORT_PARAM_NAME: &str = "reasoning_effort";
 
-const GPT_5_MODEL_ID: &str = "gpt-5";
+const GPT_5_MODEL_ID: &str = "gpt-5.2";
 const GPT_5_MINI_MODEL_ID: &str = "gpt-5-mini";
 
 // For enum_string in tool definition
