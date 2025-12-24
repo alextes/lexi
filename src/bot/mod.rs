@@ -23,6 +23,7 @@ use crate::env::ENV_CONFIG;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use anyhow::{Context, Result};
+use chrono::{Duration, Utc};
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use serde_json::Value;
@@ -43,6 +44,8 @@ pub struct BotContext<D: Db> {
 }
 
 const BOT_USERNAME: &str = "@lexi_alex_bot";
+const ADMIN_MODE_PREFIX: &str = "admin mode: ";
+const ADMIN_SESSION_TIMEOUT_SECONDS: i64 = 60 * 60;
 
 pub fn mentions_bot(
     text_option: &Option<String>,
@@ -117,13 +120,108 @@ fn strip_admin_code(prompt_text: &str, bot_admin_code: Option<&str>) -> (bool, S
     }
 }
 
-async fn admin_session_is_active<D: Db>(db: &D, local_chat_id: i32) -> bool {
-    match admin_session::get_admin_session_state(db, local_chat_id).await {
-        Ok(Some(state)) => state.active,
-        Ok(None) => false,
+struct AdminSessionResolution {
+    active: bool,
+    restore_applied: bool,
+    restored_response_id: Option<String>,
+}
+
+fn maybe_prefix_admin_mode(reply_text: &str, admin_session_active: bool) -> String {
+    if admin_session_active && !reply_text.starts_with(ADMIN_MODE_PREFIX) {
+        format!("{ADMIN_MODE_PREFIX}{reply_text}")
+    } else {
+        reply_text.to_string()
+    }
+}
+
+async fn restore_previous_response_id<D: Db>(
+    db: &D,
+    telegram_chat_id: i64,
+    local_chat_id: i32,
+    last_response_id_before_admin: Option<&str>,
+) {
+    match last_response_id_before_admin {
+        Some(resp_id) => {
+            if let Err(e) = db
+                .update_last_openai_response_id(local_chat_id, resp_id)
+                .await
+            {
+                warn!(chat_id = telegram_chat_id, response_id = resp_id, error = %e, "failed to restore last_openai_response_id after admin session end.");
+            }
+        }
+        None => {
+            if let Err(e) = db.clear_last_openai_response_id(local_chat_id).await {
+                warn!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id after admin session end.");
+            }
+        }
+    }
+}
+
+async fn resolve_admin_session_state<D: Db>(
+    ctx: &BotContext<D>,
+    telegram_chat_id: i64,
+    local_chat_id: i32,
+) -> AdminSessionResolution {
+    match admin_session::get_admin_session_state(&ctx.db, local_chat_id).await {
+        Ok(Some(state)) => {
+            if state.active {
+                let is_expired = match state.started_at {
+                    Some(started_at) => {
+                        Utc::now().signed_duration_since(started_at)
+                            > Duration::seconds(ADMIN_SESSION_TIMEOUT_SECONDS)
+                    }
+                    None => true,
+                };
+
+                if is_expired {
+                    restore_previous_response_id(
+                        &ctx.db,
+                        telegram_chat_id,
+                        local_chat_id,
+                        state.last_response_id_before_admin.as_deref(),
+                    )
+                    .await;
+                    if let Err(e) = admin_session::end_admin_session(&ctx.db, local_chat_id).await {
+                        warn!(chat_id = telegram_chat_id, error = %e, "failed to clear admin session state after timeout.");
+                    }
+                    let timeout_message =
+                        "system message: admin session timed out after 1h; returning to normal mode.";
+                    if let Err(e) = telegram::send_message(
+                        &ctx.http_client,
+                        ctx.api_base_url.as_str(),
+                        ctx.bot_token.as_str(),
+                        telegram_chat_id,
+                        timeout_message,
+                    )
+                    .await
+                    {
+                        warn!(chat_id = telegram_chat_id, error = %e, "failed to send admin session timeout message.");
+                    }
+                    return AdminSessionResolution {
+                        active: false,
+                        restore_applied: true,
+                        restored_response_id: state.last_response_id_before_admin,
+                    };
+                }
+            }
+            AdminSessionResolution {
+                active: state.active,
+                restore_applied: false,
+                restored_response_id: None,
+            }
+        }
+        Ok(None) => AdminSessionResolution {
+            active: false,
+            restore_applied: false,
+            restored_response_id: None,
+        },
         Err(e) => {
             warn!(local_chat_id, error = %e, "failed to read admin session state");
-            false
+            AdminSessionResolution {
+                active: false,
+                restore_applied: false,
+                restored_response_id: None,
+            }
         }
     }
 }
@@ -275,7 +373,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 )
             };
 
-            let previous_response_id_opt_string = match ctx
+            let mut previous_response_id_opt_string = match ctx
                 .db
                 .get_last_openai_response_id(local_chat_id_for_conversation)
                 .await
@@ -289,8 +387,17 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
             let (admin_code_detected, sanitized_prompt) =
                 strip_admin_code(&prompt_text, ENV_CONFIG.bot_admin_code.as_deref());
-            let mut admin_session_active =
-                admin_session_is_active(&ctx.db, local_chat_id_for_conversation).await;
+            let admin_session_resolution = resolve_admin_session_state(
+                ctx,
+                incoming_message.chat.id,
+                local_chat_id_for_conversation,
+            )
+            .await;
+            if admin_session_resolution.restore_applied {
+                previous_response_id_opt_string =
+                    admin_session_resolution.restored_response_id.clone();
+            }
+            let mut admin_session_active = admin_session_resolution.active;
             if !admin_session_active && admin_code_detected {
                 if let Err(e) = admin_session::start_admin_session(
                     &ctx.db,
@@ -314,6 +421,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     incoming_message.from.as_ref().map_or("there", |u| &u.first_name),
                     if incoming_message.chat.chat_type == "private" { "messaged" } else { "mentioned" }
                 );
+                let acknowledgement =
+                    maybe_prefix_admin_mode(&acknowledgement, admin_session_active);
                 send_reply_and_update_state(
                     ctx,
                     incoming_message.chat.id,
@@ -347,6 +456,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 {
                     Ok(ai_outcome) => match ai_outcome {
                         AiConversationOutcome::TextMessage(final_text, response_id_to_store) => {
+                            let final_text =
+                                maybe_prefix_admin_mode(&final_text, admin_session_active);
                             send_reply_and_update_state(
                                 ctx,
                                 incoming_message.chat.id,
@@ -378,6 +489,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     confirmation_json_str.to_string()
                                 }
                             };
+                            let final_message_to_send = maybe_prefix_admin_mode(
+                                &final_message_to_send,
+                                admin_session_active,
+                            );
 
                             telegram::send_message(
                                 &ctx.http_client,
@@ -433,6 +548,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     confirmation_json_str.to_string()
                                 }
                             };
+                            let final_message_to_send = maybe_prefix_admin_mode(
+                                &final_message_to_send,
+                                admin_session_active,
+                            );
                             telegram::send_message(
                                 &ctx.http_client,
                                 ctx.api_base_url.as_str(),
@@ -469,6 +588,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     confirmation_json_str.to_string()
                                 }
                             };
+                            let final_message_to_send = maybe_prefix_admin_mode(
+                                &final_message_to_send,
+                                admin_session_active,
+                            );
 
                             telegram::send_message(
                                 &ctx.http_client,
@@ -506,6 +629,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     confirmation_json_str.to_string()
                                 }
                             };
+                            let final_message_to_send = maybe_prefix_admin_mode(
+                                &final_message_to_send,
+                                admin_session_active,
+                            );
 
                             telegram::send_message(
                                 &ctx.http_client,
@@ -541,6 +668,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                     confirmation_json_str.to_string()
                                 }
                             };
+                            let final_message_to_send = maybe_prefix_admin_mode(
+                                &final_message_to_send,
+                                admin_session_active,
+                            );
 
                             if let Ok(state_opt) = admin_session::get_admin_session_state(
                                 &ctx.db,
@@ -549,31 +680,13 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             .await
                             {
                                 if let Some(state) = state_opt {
-                                    match state.last_response_id_before_admin.as_deref() {
-                                        Some(resp_id) => {
-                                            if let Err(e) = ctx
-                                                .db
-                                                .update_last_openai_response_id(
-                                                    local_chat_id_for_conversation,
-                                                    resp_id,
-                                                )
-                                                .await
-                                            {
-                                                warn!(chat_id = incoming_message.chat.id, response_id = resp_id, error = %e, "failed to restore last_openai_response_id after admin session end.");
-                                            }
-                                        }
-                                        None => {
-                                            if let Err(e) = ctx
-                                                .db
-                                                .clear_last_openai_response_id(
-                                                    local_chat_id_for_conversation,
-                                                )
-                                                .await
-                                            {
-                                                warn!(chat_id = incoming_message.chat.id, error = %e, "failed to clear last_openai_response_id after admin session end.");
-                                            }
-                                        }
-                                    }
+                                    restore_previous_response_id(
+                                        &ctx.db,
+                                        incoming_message.chat.id,
+                                        local_chat_id_for_conversation,
+                                        state.last_response_id_before_admin.as_deref(),
+                                    )
+                                    .await;
                                 }
                             } else {
                                 warn!(
@@ -604,8 +717,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     },
                     Err(e) => {
                         error!(chat_id = incoming_message.chat.id, error = %e, "error from drive_ai_conversation");
-                        let fallback_text =
-                            format!("sorry, an error occurred while generating the ai reply: {e}");
+                        let fallback_text = maybe_prefix_admin_mode(
+                            &format!("sorry, an error occurred while generating the ai reply: {e}"),
+                            admin_session_active,
+                        );
                         let _ = send_reply_and_update_state(
                             ctx,
                             incoming_message.chat.id,
