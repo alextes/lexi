@@ -2,3 +2,6 @@
 
 # env vars
 .env
+
+# keep claude workflow local for now
+.claude
