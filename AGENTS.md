@@ -21,3 +21,7 @@ run `bd prime` for workflow context, or install hooks (`bd hooks install`) for a
 - `bd sync` - sync with git (run at session end)
 
 for full workflow details: `bd prime`
+
+## commits
+
+this repo uses conventional commits (e.g., `feat: ...`, `fix: ...`, `refactor(bot): ...`).
