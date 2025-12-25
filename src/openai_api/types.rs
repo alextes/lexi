@@ -113,19 +113,27 @@ impl ToolDefinition {
         description: Option<String>,
         parameters: Option<ToolFunctionParameters>,
     ) -> Self {
-        let mut updated_parameters = parameters;
-        if let Some(ref mut params) = updated_parameters {
-            // for strict tools, required must include every key in properties per api docs
-            let required_param_names: Vec<String> = params.properties.keys().cloned().collect();
-            params.required = Some(required_param_names);
-            params.additional_properties = false;
-        }
+        // OpenAI strict mode requires all tools to have a parameters schema with
+        // additionalProperties: false, even for tools that take no arguments.
+        // Default to an empty schema if none provided.
+        let mut updated_parameters = parameters.unwrap_or_else(|| ToolFunctionParameters {
+            r#type: "object".to_string(),
+            properties: HashMap::new(),
+            required: Some(vec![]),
+            additional_properties: false,
+        });
+
+        // for strict tools, required must include every key in properties per api docs
+        let required_param_names: Vec<String> =
+            updated_parameters.properties.keys().cloned().collect();
+        updated_parameters.required = Some(required_param_names);
+        updated_parameters.additional_properties = false;
 
         ToolDefinition {
             r#type: "function".to_string(),
             name,
             description,
-            parameters: updated_parameters,
+            parameters: Some(updated_parameters),
             strict: Some(true),
         }
     }

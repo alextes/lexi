@@ -12,7 +12,7 @@ pub static ADMIN_SESSION_END_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         Some(
             "ends the current admin session and restores normal conversation context.".to_string(),
         ),
-        None,
+        None, // ToolDefinition::new handles empty parameters for strict mode
     )
 });
 
