@@ -1,0 +1,5 @@
+schema_version = 6
+id_prefix = "lexi"
+id_len = 4
+auto_pull = true
+auto_push = true
