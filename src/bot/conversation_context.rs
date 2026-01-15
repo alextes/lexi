@@ -109,7 +109,9 @@ mod tests {
             .times(1)
             .returning(|_, _| Ok(()));
 
-        update_response_id(&mock_db, &key, "resp_new").await.unwrap();
+        update_response_id(&mock_db, &key, "resp_new")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

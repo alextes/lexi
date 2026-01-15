@@ -19,13 +19,13 @@ use crate::ai_interaction::tools::beacon_slot_check::BeaconNodeHttp;
 use crate::ai_interaction::tools::db_schema::LiveSchemaFetcher;
 use crate::ai_interaction::tools::relay_circuit_breaker::RelayCircuitBreaker;
 use crate::ai_interaction::{self, admin_session, AiConversationOutcome};
-use conversation_context::ConversationKey;
 use crate::db::Db;
 use crate::env::ENV_CONFIG;
 use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
+use conversation_context::ConversationKey;
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use serde_json::Value;
@@ -290,8 +290,7 @@ pub async fn send_reply_and_update_state<D: Db>(
                 chat_id = telegram_chat_id,
                 "no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for conversation."
             );
-            if let Err(e) =
-                conversation_context::clear_response_id(&ctx.db, conversation_key).await
+            if let Err(e) = conversation_context::clear_response_id(&ctx.db, conversation_key).await
             {
                 error!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id for conversation after an issue.");
             }
@@ -381,14 +380,18 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 )
             };
 
-            let mut previous_response_id_opt_string =
-                match conversation_context::get_response_id(&ctx.db, &conversation_key).await {
-                    Ok(id_opt) => id_opt,
-                    Err(e) => {
-                        warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
-                        None
-                    }
-                };
+            let mut previous_response_id_opt_string = match conversation_context::get_response_id(
+                &ctx.db,
+                &conversation_key,
+            )
+            .await
+            {
+                Ok(id_opt) => id_opt,
+                Err(e) => {
+                    warn!(chat_id = incoming_message.chat.id, error = %e, "failed to fetch last_openai_response_id, proceeding without it.");
+                    None
+                }
+            };
 
             let (admin_code_detected, sanitized_prompt) =
                 strip_admin_code(&prompt_text, ENV_CONFIG.bot_admin_code.as_deref());
