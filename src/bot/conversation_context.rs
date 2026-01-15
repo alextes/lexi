@@ -5,6 +5,7 @@
 use crate::ai_interaction::topic_context;
 use crate::db::Db;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 /// Identifies a conversation context - either a chat or a specific topic within a chat.
 #[derive(Debug, Clone)]
@@ -65,6 +66,44 @@ pub async fn clear_response_id<D: Db>(db: &D, key: &ConversationKey) -> Result<(
             topic_context::clear_topic_response_id(db, key.local_chat_id, thread_id).await
         }
         None => db.clear_last_openai_response_id(key.local_chat_id).await,
+    }
+}
+
+/// Get the timestamp of the last bot message in a conversation.
+/// Routes to topic-level storage if thread_id is present, otherwise uses chat-level storage.
+pub async fn get_last_bot_message_at<D: Db>(
+    db: &D,
+    key: &ConversationKey,
+) -> Result<Option<DateTime<Utc>>> {
+    match key.message_thread_id {
+        Some(thread_id) => {
+            topic_context::get_topic_last_bot_message_at(db, key.local_chat_id, thread_id).await
+        }
+        None => db.get_last_bot_message_at(key.local_chat_id).await,
+    }
+}
+
+/// Update the timestamp of the last bot message in a conversation.
+/// Routes to topic-level storage if thread_id is present, otherwise uses chat-level storage.
+pub async fn update_last_bot_message_at<D: Db>(
+    db: &D,
+    key: &ConversationKey,
+    timestamp: DateTime<Utc>,
+) -> Result<()> {
+    match key.message_thread_id {
+        Some(thread_id) => {
+            topic_context::set_topic_last_bot_message_at(
+                db,
+                key.local_chat_id,
+                thread_id,
+                timestamp,
+            )
+            .await
+        }
+        None => {
+            db.update_last_bot_message_at(key.local_chat_id, timestamp)
+                .await
+        }
     }
 }
 
