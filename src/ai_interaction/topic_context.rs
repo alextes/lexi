@@ -4,9 +4,11 @@
 
 use crate::db::Db;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 const TOPIC_RESPONSE_KEY_PREFIX: &str = "topic_response_id:chat:";
+const TOPIC_LAST_BOT_AT_KEY_PREFIX: &str = "topic_last_bot_at:chat:";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TopicResponseState {
@@ -53,6 +55,44 @@ pub async fn clear_topic_response_id<D: Db>(
     let key = topic_response_key(local_chat_id, thread_id);
     let state = TopicResponseState {
         last_openai_response_id: None,
+    };
+    db.set_kv(&key, &state).await
+}
+
+// --- Topic last bot message timestamp tracking ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TopicLastBotAtState {
+    pub last_bot_message_at: Option<DateTime<Utc>>,
+}
+
+fn topic_last_bot_at_key(local_chat_id: i32, thread_id: i64) -> String {
+    format!("{TOPIC_LAST_BOT_AT_KEY_PREFIX}{local_chat_id}:thread:{thread_id}")
+}
+
+/// Get the last bot message timestamp for a specific topic.
+pub async fn get_topic_last_bot_message_at<D: Db>(
+    db: &D,
+    local_chat_id: i32,
+    thread_id: i64,
+) -> Result<Option<DateTime<Utc>>> {
+    let key = topic_last_bot_at_key(local_chat_id, thread_id);
+    match db.get_kv::<TopicLastBotAtState>(&key).await? {
+        Some((state, _)) => Ok(state.last_bot_message_at),
+        None => Ok(None),
+    }
+}
+
+/// Set the last bot message timestamp for a specific topic.
+pub async fn set_topic_last_bot_message_at<D: Db>(
+    db: &D,
+    local_chat_id: i32,
+    thread_id: i64,
+    timestamp: DateTime<Utc>,
+) -> Result<()> {
+    let key = topic_last_bot_at_key(local_chat_id, thread_id);
+    let state = TopicLastBotAtState {
+        last_bot_message_at: Some(timestamp),
     };
     db.set_kv(&key, &state).await
 }

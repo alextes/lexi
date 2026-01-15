@@ -11,6 +11,7 @@
 //! - sending the final reply back to the telegram user.
 //! - maintaining conversation context by storing relevant openai response ids in the database.
 
+pub mod context_builder;
 pub mod conversation_context;
 pub mod r#loop;
 mod proactive;
@@ -296,6 +297,23 @@ pub async fn send_reply_and_update_state<D: Db>(
             }
         }
     }
+
+    // Update the timestamp of the last bot message for context tracking
+    if let Some(bot_msg_at) = context_builder::unix_to_datetime(sent_bot_message.date) {
+        if let Err(e) =
+            conversation_context::update_last_bot_message_at(&ctx.db, conversation_key, bot_msg_at)
+                .await
+        {
+            warn!(chat_id = telegram_chat_id, error = %e, "failed to update last_bot_message_at for conversation.");
+        }
+    } else {
+        warn!(
+            chat_id = telegram_chat_id,
+            date = sent_bot_message.date,
+            "invalid timestamp from sent bot message, could not update last_bot_message_at"
+        );
+    }
+
     Ok(())
 }
 
@@ -445,6 +463,25 @@ pub async fn handle_telegram_update<D: Db + Clone>(
             } else if !sanitized_prompt.is_empty() {
                 let current_model_id_for_ai_call = ai_interaction::get_current_model_id().await;
 
+                // For group chats, build context with missed messages since last bot response
+                let prompt_with_context = if incoming_message.chat.chat_type != "private" {
+                    match context_builder::build_context_with_missed_messages(
+                        &ctx.db,
+                        &conversation_key,
+                        &sanitized_prompt,
+                    )
+                    .await
+                    {
+                        Ok(prompt) => prompt,
+                        Err(e) => {
+                            warn!(chat_id = incoming_message.chat.id, error = %e, "failed to build context with missed messages, using prompt without context");
+                            sanitized_prompt.clone()
+                        }
+                    }
+                } else {
+                    sanitized_prompt.clone()
+                };
+
                 let mp_ctx = ai_interaction::HandlerContext {
                     db: ctx.db.clone(),
                     http_client: ctx.http_client.clone(),
@@ -457,7 +494,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
 
                 match ai_interaction::drive_ai_conversation(
                     &mp_ctx,
-                    &sanitized_prompt,
+                    &prompt_with_context,
                     previous_response_id_opt_string.as_deref(),
                     &current_model_id_for_ai_call,
                     admin_session_active,

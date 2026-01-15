@@ -41,6 +41,19 @@ pub trait Db {
         &self,
         key: &str,
     ) -> Result<Option<(T, DateTime<Utc>)>>;
+    async fn get_last_bot_message_at(&self, local_chat_id: i32) -> Result<Option<DateTime<Utc>>>;
+    async fn update_last_bot_message_at(
+        &self,
+        local_chat_id: i32,
+        timestamp: DateTime<Utc>,
+    ) -> Result<()>;
+    async fn get_messages_since(
+        &self,
+        local_chat_id: i32,
+        message_thread_id: Option<i64>,
+        since: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<MessageWithSender>>;
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +308,116 @@ impl Db for PostgresDb {
     ) -> Result<Option<(T, DateTime<Utc>)>> {
         self.key_value_store.get(key).await
     }
+
+    /// Retrieves the last_bot_message_at timestamp for a given chat.
+    async fn get_last_bot_message_at(&self, local_chat_id: i32) -> Result<Option<DateTime<Utc>>> {
+        let result = sqlx::query!(
+            "SELECT last_bot_message_at FROM chats WHERE id = $1",
+            local_chat_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("failed to fetch last_bot_message_at for chat_id {local_chat_id}")
+        })?;
+        Ok(result.last_bot_message_at)
+    }
+
+    /// Updates the last_bot_message_at timestamp for a given chat.
+    async fn update_last_bot_message_at(
+        &self,
+        local_chat_id: i32,
+        timestamp: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query!(
+            "UPDATE chats SET last_bot_message_at = $1, updated_at = now() WHERE id = $2",
+            timestamp,
+            local_chat_id
+        )
+        .execute(&self.pool)
+        .await
+        .with_context(|| {
+            format!("failed to update last_bot_message_at for chat_id {local_chat_id}")
+        })?;
+        Ok(())
+    }
+
+    /// Fetches messages since a given timestamp, with sender information.
+    /// Used to build context from missed messages between bot responses.
+    async fn get_messages_since(
+        &self,
+        local_chat_id: i32,
+        message_thread_id: Option<i64>,
+        since: DateTime<Utc>,
+        limit: i64,
+    ) -> Result<Vec<MessageWithSender>> {
+        // Use different queries based on whether we're filtering by thread_id
+        let messages = match message_thread_id {
+            Some(thread_id) => {
+                sqlx::query_as!(
+                    MessageWithSender,
+                    r#"
+                    SELECT
+                        m.text,
+                        u.username as sender_username,
+                        u.first_name as sender_first_name,
+                        u.is_bot,
+                        m.sent_at
+                    FROM messages m
+                    JOIN users u ON m.sender_id = u.id
+                    WHERE m.chat_id = $1
+                      AND m.message_thread_id = $2
+                      AND m.sent_at > $3
+                    ORDER BY m.sent_at ASC
+                    LIMIT $4
+                    "#,
+                    local_chat_id,
+                    thread_id,
+                    since,
+                    limit
+                )
+                .fetch_all(&self.pool)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to fetch messages since {since} for chat_id {local_chat_id}, thread_id {thread_id}"
+                    )
+                })?
+            }
+            None => {
+                sqlx::query_as!(
+                    MessageWithSender,
+                    r#"
+                    SELECT
+                        m.text,
+                        u.username as sender_username,
+                        u.first_name as sender_first_name,
+                        u.is_bot,
+                        m.sent_at
+                    FROM messages m
+                    JOIN users u ON m.sender_id = u.id
+                    WHERE m.chat_id = $1
+                      AND m.message_thread_id IS NULL
+                      AND m.sent_at > $2
+                    ORDER BY m.sent_at ASC
+                    LIMIT $3
+                    "#,
+                    local_chat_id,
+                    since,
+                    limit
+                )
+                .fetch_all(&self.pool)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to fetch messages since {since} for chat_id {local_chat_id} (no thread)"
+                    )
+                })?
+            }
+        };
+
+        Ok(messages)
+    }
 }
 
 // struct to represent a message from history for openai
@@ -304,6 +427,16 @@ pub struct MessageFromHistory {
     pub text: Option<String>,
     // pub sent_at: DateTime<Utc>, // not directly needed for openai message construction yet
     // pub username: Option<String>, // potentially useful for the 'name' field in openai message
+}
+
+/// Message with sender information for building conversation context
+#[derive(Debug, Clone)]
+pub struct MessageWithSender {
+    pub text: Option<String>,
+    pub sender_username: Option<String>,
+    pub sender_first_name: String,
+    pub is_bot: bool,
+    pub sent_at: DateTime<Utc>,
 }
 
 #[cfg(test)]
