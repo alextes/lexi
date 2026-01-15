@@ -161,8 +161,8 @@ impl Db for PostgresDb {
 
         let insert_result = sqlx::query!(
             r#"
-            INSERT INTO messages (telegram_message_id, chat_id, sender_id, text, sent_at, raw_message, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, now())
+            INSERT INTO messages (telegram_message_id, chat_id, sender_id, text, sent_at, raw_message, message_thread_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, now())
             ON CONFLICT (chat_id, telegram_message_id) DO NOTHING
             RETURNING id;
             "#,
@@ -171,7 +171,8 @@ impl Db for PostgresDb {
             local_user_id,
             message_data.text,
             sent_at_datetime,
-            raw_message_json
+            raw_message_json,
+            message_data.message_thread_id
         )
         .fetch_optional(&self.pool)
         .await
@@ -348,6 +349,7 @@ mod tests {
     ) -> TelegramMessage {
         TelegramMessage {
             message_id: id,
+            message_thread_id: None,
             from: Some(from_user),
             date: Utc::now().timestamp(),
             chat,
@@ -469,6 +471,7 @@ mod tests {
             // make sure sent_at is distinct and in order for testing
             let msg_tg = TelegramMessage {
                 message_id: 1000 + i,
+                message_thread_id: None,
                 from: Some(user.clone()),
                 chat: chat.clone(),
                 date: Utc::now().timestamp() + i, // ensure distinct timestamps

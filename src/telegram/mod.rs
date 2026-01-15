@@ -15,7 +15,8 @@ use types::{ApiResponse, Message as TelegramMessage, User as TelegramUser};
 struct SendMessageParams<'a> {
     chat_id: i64,
     text: &'a str,
-    // We can add more fields later like parse_mode, reply_to_message_id, etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_thread_id: Option<i64>,
 }
 
 // Function to send a message via Telegram API
@@ -25,10 +26,15 @@ pub async fn send_message(
     bot_token: &str,
     chat_id: i64,
     text: &str,
+    message_thread_id: Option<i64>,
 ) -> Result<TelegramMessage> {
     let url = format!("{api_base_url}{bot_token}/sendMessage");
 
-    let params = SendMessageParams { chat_id, text };
+    let params = SendMessageParams {
+        chat_id,
+        text,
+        message_thread_id,
+    };
 
     tracing::debug!(url = %url, ?params, "sending message to telegram");
 

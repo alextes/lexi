@@ -29,6 +29,7 @@ use tokio::sync::RwLock;
 pub mod admin_session;
 pub mod openai_chat;
 pub mod tools;
+pub mod topic_context;
 
 // global model id store
 pub static GLOBAL_MODEL_ID: LazyLock<RwLock<String>> =
