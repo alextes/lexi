@@ -18,7 +18,8 @@ pub struct Update {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Message {
     pub message_id: i64,
-    pub from: Option<User>, // Optional: sender, empty for messages sent to channels
+    pub message_thread_id: Option<i64>, // Forum topic thread ID (for supergroups with topics enabled)
+    pub from: Option<User>,             // Optional: sender, empty for messages sent to channels
     pub chat: Chat,
     pub date: i64, // This is a Unix timestamp from Telegram
     pub text: Option<String>,

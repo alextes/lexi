@@ -11,6 +11,7 @@
 //! - sending the final reply back to the telegram user.
 //! - maintaining conversation context by storing relevant openai response ids in the database.
 
+pub mod conversation_context;
 pub mod r#loop;
 mod proactive;
 
@@ -24,6 +25,7 @@ use crate::telegram;
 use crate::telegram::types::{Message as TelegramMessage, MessageEntity, Update as TelegramUpdate};
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
+use conversation_context::ConversationKey;
 use reqwest::Client as ReqwestClient;
 use serde_json::to_string as serde_json_to_string;
 use serde_json::Value;
@@ -161,6 +163,7 @@ async fn resolve_admin_session_state<D: Db>(
     ctx: &BotContext<D>,
     telegram_chat_id: i64,
     local_chat_id: i32,
+    message_thread_id: Option<i64>,
 ) -> AdminSessionResolution {
     match admin_session::get_admin_session_state(&ctx.db, local_chat_id).await {
         Ok(Some(state)) => {
@@ -192,6 +195,7 @@ async fn resolve_admin_session_state<D: Db>(
                         ctx.bot_token.as_str(),
                         telegram_chat_id,
                         timeout_message,
+                        message_thread_id,
                     )
                     .await
                     {
@@ -229,9 +233,10 @@ async fn resolve_admin_session_state<D: Db>(
 pub async fn send_reply_and_update_state<D: Db>(
     ctx: &BotContext<D>,
     telegram_chat_id: i64,
-    local_chat_id_for_db: i32,
+    conversation_key: &ConversationKey,
     reply_text: &str,
     response_id_to_store: Option<&str>,
+    message_thread_id: Option<i64>,
 ) -> Result<()> {
     info!(
         chat_id = telegram_chat_id,
@@ -244,6 +249,7 @@ pub async fn send_reply_and_update_state<D: Db>(
         &ctx.bot_token,
         telegram_chat_id,
         reply_text,
+        message_thread_id,
     )
     .await
     .with_context(|| format!("failed to send final reply to chat_id {telegram_chat_id}"))?;
@@ -253,7 +259,7 @@ pub async fn send_reply_and_update_state<D: Db>(
     ctx.db
         .insert_message(
             &sent_bot_message,
-            local_chat_id_for_db,
+            conversation_key.local_chat_id,
             ctx.bot_db_id,
             &bot_reply_raw_json,
         )
@@ -272,25 +278,21 @@ pub async fn send_reply_and_update_state<D: Db>(
 
     match response_id_to_store {
         Some(id_to_store) if !id_to_store.starts_with("error_no_id") => {
-            if let Err(e) = ctx
-                .db
-                .update_last_openai_response_id(local_chat_id_for_db, id_to_store)
-                .await
+            if let Err(e) =
+                conversation_context::update_response_id(&ctx.db, conversation_key, id_to_store)
+                    .await
             {
-                warn!(chat_id = telegram_chat_id, response_id = id_to_store, error = %e, "failed to update last_openai_response_id for chat.");
+                warn!(chat_id = telegram_chat_id, response_id = id_to_store, error = %e, "failed to update last_openai_response_id for conversation.");
             }
         }
         _ => {
             warn!(
                 chat_id = telegram_chat_id,
-                "no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for chat."
+                "no valid response_id provided or an error placeholder was given; clearing last_openai_response_id for conversation."
             );
-            if let Err(e) = ctx
-                .db
-                .clear_last_openai_response_id(local_chat_id_for_db)
-                .await
+            if let Err(e) = conversation_context::clear_response_id(&ctx.db, conversation_key).await
             {
-                error!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id for chat after an issue.");
+                error!(chat_id = telegram_chat_id, error = %e, "failed to clear last_openai_response_id for conversation after an issue.");
             }
         }
     }
@@ -364,6 +366,11 @@ pub async fn handle_telegram_update<D: Db + Clone>(
             || mentions_bot(&incoming_message.text, &incoming_message.entities);
 
         if should_trigger_ai_reply {
+            // Extract thread_id for forum topic support
+            let message_thread_id = incoming_message.message_thread_id;
+            let conversation_key =
+                ConversationKey::new(local_chat_id_for_conversation, message_thread_id);
+
             let prompt_text = if incoming_message.chat.chat_type == "private" {
                 incoming_message.text.as_deref().unwrap_or("").to_string()
             } else {
@@ -373,10 +380,11 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 )
             };
 
-            let mut previous_response_id_opt_string = match ctx
-                .db
-                .get_last_openai_response_id(local_chat_id_for_conversation)
-                .await
+            let mut previous_response_id_opt_string = match conversation_context::get_response_id(
+                &ctx.db,
+                &conversation_key,
+            )
+            .await
             {
                 Ok(id_opt) => id_opt,
                 Err(e) => {
@@ -391,6 +399,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 ctx,
                 incoming_message.chat.id,
                 local_chat_id_for_conversation,
+                message_thread_id,
             )
             .await;
             if admin_session_resolution.restore_applied {
@@ -426,9 +435,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                 send_reply_and_update_state(
                     ctx,
                     incoming_message.chat.id,
-                    local_chat_id_for_conversation,
+                    &conversation_key,
                     &acknowledgement,
                     None,
+                    message_thread_id,
                 )
                 .await
                 .context("failed to send/store acknowledgement for empty prompt")?;
@@ -461,9 +471,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                             send_reply_and_update_state(
                                 ctx,
                                 incoming_message.chat.id,
-                                local_chat_id_for_conversation,
+                                &conversation_key,
                                 &final_text,
                                 Some(&response_id_to_store),
+                                message_thread_id,
                             )
                             .await?;
                         }
@@ -500,20 +511,20 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
+                                message_thread_id,
                             )
                             .await
                             .context("failed to send conversation reset confirmation message")?;
 
-                            if let Err(e) = ctx
-                                .db
-                                .clear_last_openai_response_id(local_chat_id_for_conversation)
-                                .await
+                            if let Err(e) =
+                                conversation_context::clear_response_id(&ctx.db, &conversation_key)
+                                    .await
                             {
                                 error!(
                                     chat_id = incoming_message.chat.id,
                                     local_chat_id = local_chat_id_for_conversation,
                                     error = %e,
-                                    "critical: failed to clear last_openai_response_id in db for chat after reset."
+                                    "critical: failed to clear last_openai_response_id in db for conversation after reset."
                                 );
                                 // we'll continue, but the next message might be in the wrong context.
                             }
@@ -558,6 +569,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
+                                message_thread_id,
                             )
                             .await
                             .context("failed to send model change confirmation message")?;
@@ -599,6 +611,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
+                                message_thread_id,
                             )
                             .await
                             .context("failed to send verbosity change confirmation message")?;
@@ -640,6 +653,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
+                                message_thread_id,
                             )
                             .await
                             .context(
@@ -710,6 +724,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 ctx.bot_token.as_str(),
                                 incoming_message.chat.id,
                                 &final_message_to_send,
+                                message_thread_id,
                             )
                             .await
                             .context("failed to send admin session end confirmation message")?;
@@ -724,9 +739,10 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                         let _ = send_reply_and_update_state(
                             ctx,
                             incoming_message.chat.id,
-                            local_chat_id_for_conversation,
+                            &conversation_key,
                             &fallback_text,
                             None,
+                            message_thread_id,
                         )
                         .await
                         .map_err(|send_err| {

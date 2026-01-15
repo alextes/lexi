@@ -102,6 +102,7 @@ async fn run_proactive_slot_check(
         ctx.bot_token.as_str(),
         telegram_chat_id,
         &reply_text,
+        None, // Proactive messages go to main chat, not a topic
     )
     .await
     {

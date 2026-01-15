@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO messages (telegram_message_id, chat_id, sender_id, text, sent_at, raw_message, message_thread_id, created_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, now())\n            ON CONFLICT (chat_id, telegram_message_id) DO NOTHING\n            RETURNING id;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int4",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "342a86d874aeb532165cc1c81235f37a13f6e2253c789713e9799bec8aee207a"
+}
