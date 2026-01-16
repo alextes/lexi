@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgres://postgres:password@postgres:5432/lexi
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/lexi
     depends_on:
       - postgres
     restart: unless-stopped
@@ -15,7 +15,7 @@ services:
     container_name: lexi_psql
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: lexi
     ports:
       - "5441:5432"
