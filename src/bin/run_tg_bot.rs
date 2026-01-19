@@ -24,6 +24,7 @@ use lexi::bot::r#loop::{run_bot_loop, TELEGRAM_API_URL};
 use lexi::db::{self, Db};
 use lexi::env::ENV_CONFIG;
 use lexi::log;
+use lexi::scheduler::{service::run_scheduler, SchedulerContext};
 use lexi::telegram;
 
 #[tokio::main]
@@ -143,6 +144,14 @@ async fn main() -> Result<()> {
         beacon_node,
         relay_circuit_breaker,
     };
+
+    // Spawn the scheduler service in the background
+    let scheduler_ctx = SchedulerContext::from_bot_context(&bot_ctx);
+    tokio::spawn(async move {
+        if let Err(e) = run_scheduler(scheduler_ctx).await {
+            tracing::error!(error = %e, "scheduler service failed");
+        }
+    });
 
     run_bot_loop(bot_ctx).await
 }

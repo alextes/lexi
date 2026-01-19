@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE scheduled_jobs\n                    SET enabled = $1, updated_at = NOW()\n                    WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id = $4\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6aa469feb5e919c0d27ea290fadb4f5df249e005e95fe9d9c602d03f1979d034"
+}

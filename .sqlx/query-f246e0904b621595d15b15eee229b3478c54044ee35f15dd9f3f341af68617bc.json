@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO scheduled_jobs (name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f246e0904b621595d15b15eee229b3478c54044ee35f15dd9f3f341af68617bc"
+}
