@@ -493,6 +493,8 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                     beacon_node: ctx.beacon_node.clone(),
                     relay_circuit_breaker: ctx.relay_circuit_breaker.clone(),
                     schema_fetcher: ctx.schema_fetcher.clone(),
+                    current_telegram_chat_id: Some(incoming_message.chat.id),
+                    current_message_thread_id: message_thread_id,
                 };
 
                 match ai_interaction::drive_ai_conversation(

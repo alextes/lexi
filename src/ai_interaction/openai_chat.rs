@@ -42,6 +42,7 @@ pub static OPENAI_CALL_CONFIG: LazyLock<OpenAiCallConfig> = LazyLock::new(|| {
         ApiToolType::Function(tools::retrieve_manual::RETRIEVE_MANUAL_TOOL.clone()),
         ApiToolType::Function(tools::relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL.clone()),
         ApiToolType::Function(tools::conversation_admin::CONVERSATION_ADMIN_TOOL.clone()),
+        ApiToolType::Function(tools::scheduled_jobs::SCHEDULED_JOBS_TOOL.clone()),
         ApiToolType::WebSearch(WebSearchToolConfig::new()),
     ];
     let instructions = indoc! {"
@@ -131,6 +132,14 @@ async fn execute_tool_call<D: Db, B: BeaconNode>(
     } else if tool_name == relay_circuit_breaker::RELAY_CIRCUIT_BREAKER_TOOL_NAME {
         relay_circuit_breaker::execute_relay_circuit_breaker_tool(
             &ctx.relay_circuit_breaker,
+            arguments,
+        )
+        .await
+    } else if tool_name == scheduled_jobs::SCHEDULED_JOBS_TOOL_NAME {
+        scheduled_jobs::execute_scheduled_jobs(
+            &ctx.db,
+            ctx.current_telegram_chat_id,
+            ctx.current_message_thread_id,
             arguments,
         )
         .await

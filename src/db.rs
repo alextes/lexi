@@ -6,6 +6,7 @@ use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use std::str::FromStr;
 
 use crate::key_value_store::{KeyValueStore, PostgresKeyValueStore};
+use crate::scheduler::types::ScheduledJob;
 use crate::telegram::types::{
     Chat as TelegramChat, Message as TelegramMessage, User as TelegramUser,
 };
@@ -54,6 +55,33 @@ pub trait Db {
         since: DateTime<Utc>,
         limit: i64,
     ) -> Result<Vec<MessageWithSender>>;
+    async fn get_enabled_scheduled_jobs(&self) -> Result<Vec<ScheduledJob>>;
+    async fn get_scheduled_jobs_for_chat(
+        &self,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<Vec<ScheduledJob>>;
+    async fn create_scheduled_job(
+        &self,
+        name: &str,
+        cron_schedule: &str,
+        prompt: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<i32>;
+    async fn delete_scheduled_job_by_name(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<bool>;
+    async fn set_scheduled_job_enabled(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+        enabled: bool,
+    ) -> Result<bool>;
 }
 
 #[derive(Debug, Clone)]
@@ -419,6 +447,174 @@ impl Db for PostgresDb {
         };
 
         Ok(messages)
+    }
+
+    /// Fetches all enabled scheduled jobs from the database.
+    async fn get_enabled_scheduled_jobs(&self) -> Result<Vec<ScheduledJob>> {
+        let jobs = sqlx::query_as!(
+            ScheduledJob,
+            r#"
+            SELECT id, name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at
+            FROM scheduled_jobs
+            WHERE enabled = true
+            ORDER BY id ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| "failed to fetch enabled scheduled jobs")?;
+
+        Ok(jobs)
+    }
+
+    /// Fetches all scheduled jobs for a specific chat/thread.
+    async fn get_scheduled_jobs_for_chat(
+        &self,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<Vec<ScheduledJob>> {
+        let jobs = match message_thread_id {
+            Some(thread_id) => {
+                sqlx::query_as!(
+                    ScheduledJob,
+                    r#"
+                    SELECT id, name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at
+                    FROM scheduled_jobs
+                    WHERE telegram_chat_id = $1 AND message_thread_id = $2
+                    ORDER BY name ASC
+                    "#,
+                    telegram_chat_id,
+                    thread_id
+                )
+                .fetch_all(&self.pool)
+                .await
+                .with_context(|| format!("failed to fetch scheduled jobs for chat {telegram_chat_id} thread {thread_id}"))?
+            }
+            None => {
+                sqlx::query_as!(
+                    ScheduledJob,
+                    r#"
+                    SELECT id, name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at
+                    FROM scheduled_jobs
+                    WHERE telegram_chat_id = $1 AND message_thread_id IS NULL
+                    ORDER BY name ASC
+                    "#,
+                    telegram_chat_id
+                )
+                .fetch_all(&self.pool)
+                .await
+                .with_context(|| format!("failed to fetch scheduled jobs for chat {telegram_chat_id}"))?
+            }
+        };
+
+        Ok(jobs)
+    }
+
+    /// Creates a new scheduled job.
+    async fn create_scheduled_job(
+        &self,
+        name: &str,
+        cron_schedule: &str,
+        prompt: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<i32> {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO scheduled_jobs (name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())
+            RETURNING id
+            "#,
+            name,
+            cron_schedule,
+            prompt,
+            telegram_chat_id,
+            message_thread_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| format!("failed to create scheduled job '{name}'"))?;
+
+        Ok(result.id)
+    }
+
+    /// Deletes a scheduled job by name for a specific chat/thread.
+    /// Returns true if a job was deleted, false if no matching job was found.
+    async fn delete_scheduled_job_by_name(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+    ) -> Result<bool> {
+        let result = match message_thread_id {
+            Some(thread_id) => sqlx::query!(
+                r#"
+                    DELETE FROM scheduled_jobs
+                    WHERE name = $1 AND telegram_chat_id = $2 AND message_thread_id = $3
+                    "#,
+                name,
+                telegram_chat_id,
+                thread_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to delete scheduled job '{name}'"))?,
+            None => sqlx::query!(
+                r#"
+                    DELETE FROM scheduled_jobs
+                    WHERE name = $1 AND telegram_chat_id = $2 AND message_thread_id IS NULL
+                    "#,
+                name,
+                telegram_chat_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to delete scheduled job '{name}'"))?,
+        };
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Sets the enabled status of a scheduled job by name for a specific chat/thread.
+    /// Returns true if a job was updated, false if no matching job was found.
+    async fn set_scheduled_job_enabled(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+        enabled: bool,
+    ) -> Result<bool> {
+        let result = match message_thread_id {
+            Some(thread_id) => sqlx::query!(
+                r#"
+                    UPDATE scheduled_jobs
+                    SET enabled = $1, updated_at = NOW()
+                    WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id = $4
+                    "#,
+                enabled,
+                name,
+                telegram_chat_id,
+                thread_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            None => sqlx::query!(
+                r#"
+                    UPDATE scheduled_jobs
+                    SET enabled = $1, updated_at = NOW()
+                    WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id IS NULL
+                    "#,
+                enabled,
+                name,
+                telegram_chat_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+        };
+
+        Ok(result.rows_affected() > 0)
     }
 }
 

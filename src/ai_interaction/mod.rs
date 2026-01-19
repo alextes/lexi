@@ -111,6 +111,9 @@ pub struct HandlerContext<D: Db, B: BeaconNode> {
     pub beacon_node: B,
     pub relay_circuit_breaker: RelayCircuitBreaker,
     pub schema_fetcher: LiveSchemaFetcher,
+    // Chat context for tools that need to know which chat they're operating in
+    pub current_telegram_chat_id: Option<i64>,
+    pub current_message_thread_id: Option<i64>,
 }
 
 #[instrument(skip(ctx, prompt_text, previous_response_id))]

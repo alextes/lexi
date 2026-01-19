@@ -90,6 +90,8 @@ async fn main() -> Result<()> {
         beacon_node,
         relay_circuit_breaker,
         schema_fetcher,
+        current_telegram_chat_id: None, // CLI doesn't have a chat context
+        current_message_thread_id: None,
     };
 
     info!(

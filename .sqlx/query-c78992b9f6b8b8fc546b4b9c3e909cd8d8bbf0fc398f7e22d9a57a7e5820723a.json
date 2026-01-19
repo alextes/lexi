@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, name, cron_schedule, prompt, telegram_chat_id, message_thread_id, enabled, created_at, updated_at\n            FROM scheduled_jobs\n            WHERE enabled = true\n            ORDER BY id ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "cron_schedule",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "prompt",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "telegram_chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "message_thread_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c78992b9f6b8b8fc546b4b9c3e909cd8d8bbf0fc398f7e22d9a57a7e5820723a"
+}
