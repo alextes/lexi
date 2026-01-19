@@ -469,6 +469,7 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                         &ctx.db,
                         &conversation_key,
                         &sanitized_prompt,
+                        ctx.bot_db_id,
                     )
                     .await
                     {

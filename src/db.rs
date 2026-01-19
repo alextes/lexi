@@ -361,6 +361,7 @@ impl Db for PostgresDb {
                         m.text,
                         u.username as sender_username,
                         u.first_name as sender_first_name,
+                        m.sender_id,
                         u.is_bot,
                         m.sent_at
                     FROM messages m
@@ -392,6 +393,7 @@ impl Db for PostgresDb {
                         m.text,
                         u.username as sender_username,
                         u.first_name as sender_first_name,
+                        m.sender_id,
                         u.is_bot,
                         m.sent_at
                     FROM messages m
@@ -435,6 +437,7 @@ pub struct MessageWithSender {
     pub text: Option<String>,
     pub sender_username: Option<String>,
     pub sender_first_name: String,
+    pub sender_id: i32,
     pub is_bot: bool,
     pub sent_at: DateTime<Utc>,
 }

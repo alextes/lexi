@@ -18,6 +18,7 @@ pub async fn build_context_with_missed_messages<D: Db>(
     db: &D,
     conversation_key: &ConversationKey,
     current_prompt: &str,
+    bot_db_id: i32,
 ) -> Result<String> {
     // Get the timestamp of the last bot message
     let last_bot_at = conversation_context::get_last_bot_message_at(db, conversation_key).await?;
@@ -37,10 +38,11 @@ pub async fn build_context_with_missed_messages<D: Db>(
         )
         .await?;
 
-    // Filter out bot messages and messages without text
+    // Filter out Lexi's own messages and messages without text
+    // Note: Other bots' messages ARE included in context
     let user_messages: Vec<&MessageWithSender> = messages
         .iter()
-        .filter(|m| !m.is_bot && m.text.is_some())
+        .filter(|m| m.sender_id != bot_db_id && m.text.is_some())
         .collect();
 
     if user_messages.is_empty() {
@@ -92,12 +94,14 @@ mod tests {
         text: &str,
         username: Option<&str>,
         first_name: &str,
+        sender_id: i32,
         is_bot: bool,
     ) -> MessageWithSender {
         MessageWithSender {
             text: Some(text.to_string()),
             sender_username: username.map(String::from),
             sender_first_name: first_name.to_string(),
+            sender_id,
             is_bot,
             sent_at: Utc::now(),
         }
@@ -105,20 +109,26 @@ mod tests {
 
     #[test]
     fn test_get_sender_display_name_prefers_username() {
-        let msg = mock_message("hello", Some("alice"), "Alice", false);
+        let msg = mock_message("hello", Some("alice"), "Alice", 1, false);
         assert_eq!(get_sender_display_name(&msg), "@alice");
     }
 
     #[test]
     fn test_get_sender_display_name_falls_back_to_first_name() {
-        let msg = mock_message("hello", None, "Bob", false);
+        let msg = mock_message("hello", None, "Bob", 2, false);
         assert_eq!(get_sender_display_name(&msg), "Bob");
     }
 
     #[test]
     fn test_format_context_block() {
-        let msg1 = mock_message("I think we should use Redis", Some("alice"), "Alice", false);
-        let msg2 = mock_message("What about Memcached?", None, "Bob", false);
+        let msg1 = mock_message(
+            "I think we should use Redis",
+            Some("alice"),
+            "Alice",
+            1,
+            false,
+        );
+        let msg2 = mock_message("What about Memcached?", None, "Bob", 2, false);
         let messages: Vec<&MessageWithSender> = vec![&msg1, &msg2];
 
         let block = format_context_block(&messages);
