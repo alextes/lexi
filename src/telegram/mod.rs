@@ -17,6 +17,8 @@ struct SendMessageParams<'a> {
     text: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_thread_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parse_mode: Option<&'a str>,
 }
 
 // Function to send a message via Telegram API
@@ -27,6 +29,7 @@ pub async fn send_message(
     chat_id: i64,
     text: &str,
     message_thread_id: Option<i64>,
+    parse_mode: Option<&str>,
 ) -> Result<TelegramMessage> {
     let url = format!("{api_base_url}{bot_token}/sendMessage");
 
@@ -34,6 +37,7 @@ pub async fn send_message(
         chat_id,
         text,
         message_thread_id,
+        parse_mode,
     };
 
     tracing::debug!(url = %url, ?params, "sending message to telegram");
