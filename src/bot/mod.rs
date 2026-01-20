@@ -245,7 +245,7 @@ pub async fn send_reply_and_update_state<D: Db>(
         "sending final reply: '{}'",
         reply_text.chars().take(32).collect::<String>()
     );
-    let sent_bot_message = telegram::send_message(
+    let sent_bot_message = telegram::send_long_message(
         &ctx.http_client,
         &ctx.api_base_url,
         &ctx.bot_token,
