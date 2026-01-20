@@ -16,6 +16,7 @@ use crate::telegram::types::{
 pub trait Db {
     async fn upsert_user(&self, user_data: &TelegramUser) -> Result<i32>;
     async fn upsert_chat(&self, chat_data: &TelegramChat) -> Result<i32>;
+    async fn get_local_chat_id_by_telegram_id(&self, telegram_chat_id: i64) -> Result<Option<i32>>;
     async fn insert_message(
         &self,
         message_data: &TelegramMessage,
@@ -179,6 +180,21 @@ impl Db for PostgresDb {
         .with_context(|| format!("failed to upsert chat with telegram_id {}", chat_data.id))?;
 
         Ok(query_result.id)
+    }
+
+    /// Look up the local database chat id from a Telegram chat id.
+    /// Returns None if the chat hasn't been seen before.
+    async fn get_local_chat_id_by_telegram_id(&self, telegram_chat_id: i64) -> Result<Option<i32>> {
+        let result = sqlx::query!(
+            "SELECT id FROM chats WHERE telegram_id = $1",
+            telegram_chat_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .with_context(|| {
+            format!("failed to fetch local_chat_id for telegram_id {telegram_chat_id}")
+        })?;
+        Ok(result.map(|r| r.id))
     }
 
     // insert a message. if it already exists (based on unique(chat_id, telegram_message_id)), ignore the insert.
