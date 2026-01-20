@@ -6,6 +6,9 @@ use serde::Serialize;
 
 use types::{ApiResponse, Message as TelegramMessage, User as TelegramUser};
 
+/// Telegram's maximum message length
+const MAX_MESSAGE_LENGTH: usize = 4096;
+
 // Keep TELEGRAM_API_URL in main.rs as it's used there for getUpdates too,
 // or move to a shared consts.rs if more URLs are added.
 // For now, we'll reconstruct it or pass it.
@@ -81,6 +84,68 @@ pub async fn send_message(
             error_body
         ))
     }
+}
+
+/// Split a long message into chunks that fit Telegram's limit.
+/// Tries to split at newlines or spaces when possible.
+fn split_message(text: &str) -> Vec<&str> {
+    if text.len() <= MAX_MESSAGE_LENGTH {
+        return vec![text];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.len() <= MAX_MESSAGE_LENGTH {
+            chunks.push(remaining);
+            break;
+        }
+
+        // Find a good split point (prefer newline, then space)
+        let chunk = &remaining[..MAX_MESSAGE_LENGTH];
+        let split_at = chunk
+            .rfind('\n')
+            .or_else(|| chunk.rfind(' '))
+            .unwrap_or(MAX_MESSAGE_LENGTH);
+
+        chunks.push(&remaining[..split_at]);
+        remaining = remaining[split_at..].trim_start();
+    }
+
+    chunks
+}
+
+/// Send a message, splitting into multiple messages if it exceeds Telegram's limit.
+/// Returns the last sent message (for storing message IDs, etc.)
+pub async fn send_long_message(
+    http_client: &ReqwestClient,
+    api_base_url: &str,
+    bot_token: &str,
+    chat_id: i64,
+    text: &str,
+    message_thread_id: Option<i64>,
+    parse_mode: Option<&str>,
+) -> Result<TelegramMessage> {
+    let chunks = split_message(text);
+    let mut last_message = None;
+
+    for chunk in chunks {
+        last_message = Some(
+            send_message(
+                http_client,
+                api_base_url,
+                bot_token,
+                chat_id,
+                chunk,
+                message_thread_id,
+                parse_mode,
+            )
+            .await?,
+        );
+    }
+
+    last_message.ok_or_else(|| anyhow!("no message chunks to send"))
 }
 
 // Function to get the bot's own user details

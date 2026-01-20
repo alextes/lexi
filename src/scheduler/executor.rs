@@ -56,8 +56,8 @@ where
         AiConversationOutcome::EndAdminSession(text, _) => text,
     };
 
-    // Send to Telegram
-    telegram::send_message(
+    // Send to Telegram (split into multiple messages if needed)
+    telegram::send_long_message(
         &ctx.http_client,
         &ctx.api_base_url,
         &ctx.bot_token,
