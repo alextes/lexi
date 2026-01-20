@@ -83,6 +83,14 @@ pub trait Db {
         message_thread_id: Option<i64>,
         enabled: bool,
     ) -> Result<bool>;
+    async fn update_scheduled_job(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+        new_cron_schedule: Option<String>,
+        new_prompt: Option<String>,
+    ) -> Result<bool>;
 }
 
 #[derive(Debug, Clone)]
@@ -628,6 +636,115 @@ impl Db for PostgresDb {
             .execute(&self.pool)
             .await
             .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+        };
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Updates a scheduled job's cron_schedule and/or prompt by name for a specific chat/thread.
+    /// At least one of new_cron_schedule or new_prompt must be Some.
+    /// Returns true if a job was updated, false if no matching job was found.
+    async fn update_scheduled_job(
+        &self,
+        name: &str,
+        telegram_chat_id: i64,
+        message_thread_id: Option<i64>,
+        new_cron_schedule: Option<String>,
+        new_prompt: Option<String>,
+    ) -> Result<bool> {
+        // Build the SET clause dynamically based on provided values
+        let result = match (message_thread_id, &new_cron_schedule, &new_prompt) {
+            // Both schedule and prompt, with thread
+            (Some(thread_id), Some(schedule), Some(prompt)) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET cron_schedule = $1, prompt = $2, updated_at = NOW()
+                WHERE name = $3 AND telegram_chat_id = $4 AND message_thread_id = $5
+                "#,
+                schedule,
+                prompt,
+                name,
+                telegram_chat_id,
+                thread_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Both schedule and prompt, no thread
+            (None, Some(schedule), Some(prompt)) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET cron_schedule = $1, prompt = $2, updated_at = NOW()
+                WHERE name = $3 AND telegram_chat_id = $4 AND message_thread_id IS NULL
+                "#,
+                schedule,
+                prompt,
+                name,
+                telegram_chat_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Only schedule, with thread
+            (Some(thread_id), Some(schedule), None) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET cron_schedule = $1, updated_at = NOW()
+                WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id = $4
+                "#,
+                schedule,
+                name,
+                telegram_chat_id,
+                thread_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Only schedule, no thread
+            (None, Some(schedule), None) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET cron_schedule = $1, updated_at = NOW()
+                WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id IS NULL
+                "#,
+                schedule,
+                name,
+                telegram_chat_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Only prompt, with thread
+            (Some(thread_id), None, Some(prompt)) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET prompt = $1, updated_at = NOW()
+                WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id = $4
+                "#,
+                prompt,
+                name,
+                telegram_chat_id,
+                thread_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Only prompt, no thread
+            (None, None, Some(prompt)) => sqlx::query!(
+                r#"
+                UPDATE scheduled_jobs
+                SET prompt = $1, updated_at = NOW()
+                WHERE name = $2 AND telegram_chat_id = $3 AND message_thread_id IS NULL
+                "#,
+                prompt,
+                name,
+                telegram_chat_id
+            )
+            .execute(&self.pool)
+            .await
+            .with_context(|| format!("failed to update scheduled job '{name}'"))?,
+            // Neither schedule nor prompt - this shouldn't happen, return false
+            (_, None, None) => return Ok(false),
         };
 
         Ok(result.rows_affected() > 0)

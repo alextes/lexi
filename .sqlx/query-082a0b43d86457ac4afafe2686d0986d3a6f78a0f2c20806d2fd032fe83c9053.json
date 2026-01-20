@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE scheduled_jobs\n                SET cron_schedule = $1, prompt = $2, updated_at = NOW()\n                WHERE name = $3 AND telegram_chat_id = $4 AND message_thread_id = $5\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "082a0b43d86457ac4afafe2686d0986d3a6f78a0f2c20806d2fd032fe83c9053"
+}

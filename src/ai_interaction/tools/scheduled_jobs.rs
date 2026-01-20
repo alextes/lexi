@@ -13,6 +13,7 @@ pub const SCHEDULED_JOBS_TOOL_NAME: &str = "scheduled_jobs";
 // Command names
 const LIST_COMMAND: &str = "list";
 const ADD_COMMAND: &str = "add";
+const EDIT_COMMAND: &str = "edit";
 const DELETE_COMMAND: &str = "delete";
 const ENABLE_COMMAND: &str = "enable";
 const DISABLE_COMMAND: &str = "disable";
@@ -30,9 +31,9 @@ pub static SCHEDULED_JOBS_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         COMMAND_PARAM.to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "The operation to perform: 'list' to show all scheduled jobs, 'add' to create a new job, 'delete' to remove a job, 'enable' or 'disable' to toggle a job's active status.",
+                "The operation to perform: 'list' to show all scheduled jobs, 'add' to create a new job, 'edit' to modify an existing job's schedule or prompt, 'delete' to remove a job, 'enable' or 'disable' to toggle a job's active status.",
             )
-            .enum_string(&[LIST_COMMAND, ADD_COMMAND, DELETE_COMMAND, ENABLE_COMMAND, DISABLE_COMMAND])
+            .enum_string(&[LIST_COMMAND, ADD_COMMAND, EDIT_COMMAND, DELETE_COMMAND, ENABLE_COMMAND, DISABLE_COMMAND])
             .build(),
     );
 
@@ -40,7 +41,7 @@ pub static SCHEDULED_JOBS_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         NAME_PARAM.to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "The unique name for the scheduled job. Required for add/delete/enable/disable commands.",
+                "The unique name for the scheduled job. Required for add/edit/delete/enable/disable commands.",
             )
             .build(),
     );
@@ -49,7 +50,7 @@ pub static SCHEDULED_JOBS_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         CRON_SCHEDULE_PARAM.to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "Cron schedule expression (e.g., '0 9 * * *' for daily at 9am UTC, '*/5 * * * *' for every 5 minutes). Required for add command.",
+                "Cron schedule expression (e.g., '0 9 * * *' for daily at 9am UTC, '*/5 * * * *' for every 5 minutes). Required for add command, optional for edit command.",
             )
             .build(),
     );
@@ -58,7 +59,7 @@ pub static SCHEDULED_JOBS_TOOL: LazyLock<ToolDefinition> = LazyLock::new(|| {
         PROMPT_PARAM.to_string(),
         ToolFunctionParameterPropertyBuilder::new_string()
             .description(
-                "The prompt to send to the AI when the scheduled job runs. Required for add command.",
+                "The prompt to send to the AI when the scheduled job runs. Required for add command, optional for edit command.",
             )
             .build(),
     );
@@ -126,6 +127,7 @@ pub async fn execute_scheduled_jobs<D: Db>(
     match command {
         LIST_COMMAND => execute_list(db, chat_id, message_thread_id).await,
         ADD_COMMAND => execute_add(db, chat_id, message_thread_id, &args).await,
+        EDIT_COMMAND => execute_edit(db, chat_id, message_thread_id, &args).await,
         DELETE_COMMAND => execute_delete(db, chat_id, message_thread_id, &args).await,
         ENABLE_COMMAND => execute_set_enabled(db, chat_id, message_thread_id, &args, true).await,
         DISABLE_COMMAND => execute_set_enabled(db, chat_id, message_thread_id, &args, false).await,
@@ -257,6 +259,103 @@ async fn execute_add<D: Db>(
         }
         Err(e) => {
             let err_msg = format!("failed to create scheduled job: {e}");
+            warn!(error = %err_msg);
+            Ok(json!({
+                "status": "error",
+                "message": "database_error",
+                "details": err_msg
+            })
+            .to_string())
+        }
+    }
+}
+
+async fn execute_edit<D: Db>(
+    db: &D,
+    telegram_chat_id: i64,
+    message_thread_id: Option<i64>,
+    args: &JsonValue,
+) -> Result<String> {
+    let name = match args.get(NAME_PARAM).and_then(|v| v.as_str()) {
+        Some(n) if !n.is_empty() => n,
+        _ => {
+            return Ok(json!({
+                "status": "error",
+                "message": "missing_parameter",
+                "details": format!("'{}' is required for edit command", NAME_PARAM)
+            })
+            .to_string());
+        }
+    };
+
+    let cron_schedule = args
+        .get(CRON_SCHEDULE_PARAM)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+
+    let prompt = args
+        .get(PROMPT_PARAM)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+
+    // At least one of cron_schedule or prompt must be provided
+    if cron_schedule.is_none() && prompt.is_none() {
+        return Ok(json!({
+            "status": "error",
+            "message": "missing_parameter",
+            "details": "At least one of 'cron_schedule' or 'prompt' must be provided for edit command"
+        })
+        .to_string());
+    }
+
+    // Validate cron schedule if provided
+    if let Some(schedule) = cron_schedule {
+        if let Err(e) = croner::Cron::new(schedule).parse() {
+            return Ok(json!({
+                "status": "error",
+                "message": "invalid_cron_schedule",
+                "details": format!("Invalid cron expression '{}': {}", schedule, e)
+            })
+            .to_string());
+        }
+    }
+
+    match db
+        .update_scheduled_job(
+            name,
+            telegram_chat_id,
+            message_thread_id,
+            cron_schedule.map(|s| s.to_string()),
+            prompt.map(|s| s.to_string()),
+        )
+        .await
+    {
+        Ok(updated) => {
+            if updated {
+                let mut changes = Vec::new();
+                if let Some(s) = cron_schedule {
+                    changes.push(format!("schedule: '{}'", s));
+                }
+                if prompt.is_some() {
+                    changes.push("prompt".to_string());
+                }
+                info!(name = %name, changes = ?changes, "updated scheduled job");
+                Ok(json!({
+                    "status": "success",
+                    "message": format!("Updated scheduled job '{}' ({})", name, changes.join(", "))
+                })
+                .to_string())
+            } else {
+                Ok(json!({
+                    "status": "error",
+                    "message": "not_found",
+                    "details": format!("No scheduled job named '{}' found in this chat", name)
+                })
+                .to_string())
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("failed to update scheduled job: {e}");
             warn!(error = %err_msg);
             Ok(json!({
                 "status": "error",
@@ -603,5 +702,168 @@ mod tests {
         let parsed: JsonValue = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["status"], "error");
         assert_eq!(parsed["message"], "unknown_command");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_schedule_success() {
+        let mut mock_db = MockDb::new();
+        mock_db
+            .expect_update_scheduled_job()
+            .with(
+                eq("test_job"),
+                eq(123i64),
+                eq(None::<i64>),
+                eq(Some("0 10 * * *".to_string())),
+                eq(None::<String>),
+            )
+            .returning(|_, _, _, _, _| Ok(true));
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "test_job", "cron_schedule": "0 10 * * *"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "success");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_prompt_success() {
+        let mut mock_db = MockDb::new();
+        mock_db
+            .expect_update_scheduled_job()
+            .with(
+                eq("test_job"),
+                eq(123i64),
+                eq(None::<i64>),
+                eq(None::<String>),
+                eq(Some("New prompt".to_string())),
+            )
+            .returning(|_, _, _, _, _| Ok(true));
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "test_job", "prompt": "New prompt"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "success");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_both_success() {
+        let mut mock_db = MockDb::new();
+        mock_db
+            .expect_update_scheduled_job()
+            .with(
+                eq("test_job"),
+                eq(123i64),
+                eq(None::<i64>),
+                eq(Some("0 12 * * *".to_string())),
+                eq(Some("Updated prompt".to_string())),
+            )
+            .returning(|_, _, _, _, _| Ok(true));
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "test_job", "cron_schedule": "0 12 * * *", "prompt": "Updated prompt"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "success");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_not_found() {
+        let mut mock_db = MockDb::new();
+        mock_db
+            .expect_update_scheduled_job()
+            .with(
+                eq("nonexistent"),
+                eq(123i64),
+                eq(None::<i64>),
+                eq(Some("0 10 * * *".to_string())),
+                eq(None::<String>),
+            )
+            .returning(|_, _, _, _, _| Ok(false));
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "nonexistent", "cron_schedule": "0 10 * * *"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["message"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_missing_name() {
+        let mock_db = MockDb::new();
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "cron_schedule": "0 10 * * *"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["message"], "missing_parameter");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_missing_changes() {
+        let mock_db = MockDb::new();
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "test_job"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["message"], "missing_parameter");
+    }
+
+    #[tokio::test]
+    async fn test_edit_job_invalid_cron() {
+        let mock_db = MockDb::new();
+
+        let result = execute_scheduled_jobs(
+            &mock_db,
+            Some(123),
+            None,
+            r#"{"command": "edit", "name": "test_job", "cron_schedule": "invalid"}"#,
+        )
+        .await
+        .unwrap();
+
+        let parsed: JsonValue = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["status"], "error");
+        assert_eq!(parsed["message"], "invalid_cron_schedule");
     }
 }
