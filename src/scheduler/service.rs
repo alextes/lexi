@@ -3,6 +3,7 @@ use crate::db::Db;
 use crate::scheduler::executor::execute_scheduled_job;
 use crate::scheduler::types::ScheduledJob;
 use crate::scheduler::SchedulerContext;
+use crate::telegram;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -59,6 +60,26 @@ where
                         error = %e,
                         "scheduled job execution failed"
                     );
+
+                    // Notify Telegram about the failure
+                    let error_msg = format!("⚠️ Scheduled job '{}' failed:\n{}", state.job.name, e);
+                    if let Err(send_err) = telegram::send_message(
+                        &ctx.http_client,
+                        &ctx.api_base_url,
+                        &ctx.bot_token,
+                        state.job.telegram_chat_id,
+                        &error_msg,
+                        state.job.message_thread_id,
+                        None, // No parse mode for error messages (safer with error text)
+                    )
+                    .await
+                    {
+                        error!(
+                            job_name = %state.job.name,
+                            error = %send_err,
+                            "failed to send error notification to Telegram"
+                        );
+                    }
                 }
 
                 // Update last run time regardless of success/failure to prevent retry loops
