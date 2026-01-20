@@ -117,6 +117,7 @@ fn split_message(text: &str) -> Vec<&str> {
 }
 
 /// Send a message, splitting into multiple messages if it exceeds Telegram's limit.
+/// If parse_mode is set and sending fails due to entity parsing errors, retries without formatting.
 /// Returns the last sent message (for storing message IDs, etc.)
 pub async fn send_long_message(
     http_client: &ReqwestClient,
@@ -131,18 +132,41 @@ pub async fn send_long_message(
     let mut last_message = None;
 
     for chunk in chunks {
-        last_message = Some(
-            send_message(
-                http_client,
-                api_base_url,
-                bot_token,
-                chat_id,
-                chunk,
-                message_thread_id,
-                parse_mode,
-            )
-            .await?,
-        );
+        // Try with parse_mode first
+        let result = send_message(
+            http_client,
+            api_base_url,
+            bot_token,
+            chat_id,
+            chunk,
+            message_thread_id,
+            parse_mode,
+        )
+        .await;
+
+        // If it failed due to Markdown parsing and we had a parse_mode, retry without it
+        let message = match result {
+            Ok(msg) => msg,
+            Err(e) if parse_mode.is_some() && e.to_string().contains("can't parse entities") => {
+                tracing::warn!(
+                    "Markdown parsing failed, retrying chunk without parse_mode: {}",
+                    e
+                );
+                send_message(
+                    http_client,
+                    api_base_url,
+                    bot_token,
+                    chat_id,
+                    chunk,
+                    message_thread_id,
+                    None, // No parse_mode
+                )
+                .await?
+            }
+            Err(e) => return Err(e),
+        };
+
+        last_message = Some(message);
     }
 
     last_message.ok_or_else(|| anyhow!("no message chunks to send"))
