@@ -95,14 +95,13 @@ where
     }
 
     // Send to Telegram (split into multiple messages if needed)
-    telegram::send_long_message(
+    telegram::send_message(
         &ctx.http_client,
         &ctx.api_base_url,
         &ctx.bot_token,
         job.telegram_chat_id,
         &response_text,
         job.message_thread_id,
-        Some("Markdown"),
     )
     .await?;
 

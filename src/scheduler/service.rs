@@ -70,7 +70,6 @@ where
                         state.job.telegram_chat_id,
                         &error_msg,
                         state.job.message_thread_id,
-                        None, // No parse mode for error messages (safer with error text)
                     )
                     .await
                     {

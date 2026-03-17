@@ -197,7 +197,6 @@ async fn resolve_admin_session_state<D: Db>(
                         telegram_chat_id,
                         timeout_message,
                         message_thread_id,
-                        None,
                     )
                     .await
                     {
@@ -245,14 +244,13 @@ pub async fn send_reply_and_update_state<D: Db>(
         "sending final reply: '{}'",
         reply_text.chars().take(32).collect::<String>()
     );
-    let sent_bot_message = telegram::send_long_message(
+    let sent_bot_message = telegram::send_message(
         &ctx.http_client,
         &ctx.api_base_url,
         &ctx.bot_token,
         telegram_chat_id,
         reply_text,
         message_thread_id,
-        Some("Markdown"),
     )
     .await
     .with_context(|| format!("failed to send final reply to chat_id {telegram_chat_id}"))?;
@@ -554,7 +552,6 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                                 message_thread_id,
-                                Some("Markdown"),
                             )
                             .await
                             .context("failed to send conversation reset confirmation message")?;
@@ -613,7 +610,6 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                                 message_thread_id,
-                                Some("Markdown"),
                             )
                             .await
                             .context("failed to send model change confirmation message")?;
@@ -656,7 +652,6 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                                 message_thread_id,
-                                Some("Markdown"),
                             )
                             .await
                             .context("failed to send verbosity change confirmation message")?;
@@ -699,7 +694,6 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                                 message_thread_id,
-                                Some("Markdown"),
                             )
                             .await
                             .context(
@@ -771,7 +765,6 @@ pub async fn handle_telegram_update<D: Db + Clone>(
                                 incoming_message.chat.id,
                                 &final_message_to_send,
                                 message_thread_id,
-                                Some("Markdown"),
                             )
                             .await
                             .context("failed to send admin session end confirmation message")?;

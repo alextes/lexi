@@ -34,6 +34,7 @@ sqlx = { version = "0.8.6", features = [
 tokio = { version = "1.46.1", features = ["full"] }
 croner = "2.2"
 tracing = "0.1.41"
+pulldown-cmark = "0.13"
 tracing-subscriber = { version = "0.3.19", features = [
     "env-filter",
     "fmt",

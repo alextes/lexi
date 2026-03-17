@@ -1,18 +1,15 @@
+pub mod fmt;
 pub mod types;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client as ReqwestClient;
 use serde::Serialize;
 
+use fmt::markdown_to_telegram_html;
 use types::{ApiResponse, Message as TelegramMessage, User as TelegramUser};
 
 /// Telegram's maximum message length
 const MAX_MESSAGE_LENGTH: usize = 4096;
-
-// Keep TELEGRAM_API_URL in main.rs as it's used there for getUpdates too,
-// or move to a shared consts.rs if more URLs are added.
-// For now, we'll reconstruct it or pass it.
-// Let's assume main.rs TELEGRAM_API_URL is accessible or pass token directly.
 
 #[derive(Serialize, Debug)]
 struct SendMessageParams<'a> {
@@ -24,10 +21,10 @@ struct SendMessageParams<'a> {
     parse_mode: Option<&'a str>,
 }
 
-// Function to send a message via Telegram API
-pub async fn send_message(
+/// send a single message via telegram API with the given parse mode.
+async fn send_message_raw(
     http_client: &ReqwestClient,
-    api_base_url: &str, // e.g., "https://api.telegram.org/bot"
+    api_base_url: &str,
     bot_token: &str,
     chat_id: i64,
     text: &str,
@@ -86,8 +83,8 @@ pub async fn send_message(
     }
 }
 
-/// Split a long message into chunks that fit Telegram's limit.
-/// Tries to split at newlines or spaces when possible.
+/// split a long message into chunks that fit Telegram's limit.
+/// tries to split at newlines or spaces when possible.
 fn split_message(text: &str) -> Vec<&str> {
     if text.len() <= MAX_MESSAGE_LENGTH {
         return vec![text];
@@ -102,7 +99,7 @@ fn split_message(text: &str) -> Vec<&str> {
             break;
         }
 
-        // Find a good split point (prefer newline, then space)
+        // find a good split point (prefer newline, then space)
         let chunk = &remaining[..MAX_MESSAGE_LENGTH];
         let split_at = chunk
             .rfind('\n')
@@ -116,54 +113,51 @@ fn split_message(text: &str) -> Vec<&str> {
     chunks
 }
 
-/// Send a message, splitting into multiple messages if it exceeds Telegram's limit.
-/// If parse_mode is set and sending fails due to entity parsing errors, retries without formatting.
-/// Returns the last sent message (for storing message IDs, etc.)
-pub async fn send_long_message(
+/// send a message via telegram API.
+/// converts markdown to telegram HTML, splits into chunks if needed,
+/// and sends with parse_mode "HTML". falls back to plain text per chunk on failure.
+/// returns the last sent message.
+pub async fn send_message(
     http_client: &ReqwestClient,
     api_base_url: &str,
     bot_token: &str,
     chat_id: i64,
     text: &str,
     message_thread_id: Option<i64>,
-    parse_mode: Option<&str>,
 ) -> Result<TelegramMessage> {
-    let chunks = split_message(text);
+    let html = markdown_to_telegram_html(text);
+    let chunks = split_message(&html);
+    let plain_chunks = split_message(text);
     let mut last_message = None;
 
-    for chunk in chunks {
-        // Try with parse_mode first
-        let result = send_message(
+    for (i, chunk) in chunks.iter().enumerate() {
+        let result = send_message_raw(
             http_client,
             api_base_url,
             bot_token,
             chat_id,
             chunk,
             message_thread_id,
-            parse_mode,
+            Some("HTML"),
         )
         .await;
 
-        // If it failed due to Markdown parsing and we had a parse_mode, retry without it
         let message = match result {
             Ok(msg) => msg,
-            Err(e) if parse_mode.is_some() && e.to_string().contains("can't parse entities") => {
-                tracing::warn!(
-                    "Markdown parsing failed, retrying chunk without parse_mode: {}",
-                    e
-                );
-                send_message(
+            Err(e) => {
+                tracing::warn!(error = %e, "HTML send failed, falling back to plain text");
+                let plain = plain_chunks.get(i).unwrap_or(&text);
+                send_message_raw(
                     http_client,
                     api_base_url,
                     bot_token,
                     chat_id,
-                    chunk,
+                    plain,
                     message_thread_id,
-                    None, // No parse_mode
+                    None,
                 )
                 .await?
             }
-            Err(e) => return Err(e),
         };
 
         last_message = Some(message);
@@ -172,7 +166,7 @@ pub async fn send_long_message(
     last_message.ok_or_else(|| anyhow!("no message chunks to send"))
 }
 
-// Function to get the bot's own user details
+/// get the bot's own user details.
 pub async fn get_me(
     http_client: &ReqwestClient,
     api_base_url: &str,
